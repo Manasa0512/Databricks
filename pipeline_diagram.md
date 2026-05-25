@@ -58,181 +58,332 @@ flowchart TD
 - Silver layer parses and validates raw text into structured Delta tables.
 - Gold layer enriches variants, aggregates clinical significance, and ranks gene hotspots.
 
-## Schema Diagram
+## Schema Diagram (ER - Dark Mode Optimized)
 
 ```mermaid
-classDiagram
-    class bronze_vcf_variants_raw {
-        +string raw_value
-        +timestamp ingestion_timestamp
-        +string source_file
-        +string ingestion_id
-        +date ingestion_date
-    }
-    class bronze_gene_annotations_raw {
-        +string raw_value
-        +timestamp ingestion_timestamp
-        +string source_file
-        +string ingestion_id
-        +date ingestion_date
-    }
-    class bronze_clinical_variants_raw {
-        +int _AlleleID
-        +int VariationID
-        +string Type
-        +string GeneSymbol
-        +int GeneID
-        +string ClinicalSignificance
-        +string ReviewStatus
-        +string Chromosome
-        +long Start
-        +long Stop
-        +string ReferenceAllele
-        +string AlternateAllele
-        +string Assembly
-        +string PhenotypeIDS
-        +string PhenotypeList
-        +string Origin
-        +int NumberSubmitters
-        +string LastEvaluated
-        +timestamp ingestion_timestamp
-        +string source_file
-        +string ingestion_id
-        +date ingestion_date
-    }
-    class silver_vcf_variants {
-        +PK string chrom
-        +PK int pos
-        +PK string variant_id
-        +string ref_allele
-        +string alt_allele
-        +double quality_score
-        +string filter_status
-        +string info
-        +timestamp bronze_ingestion_timestamp
-        +string source_file
-        +timestamp silver_processing_timestamp
-        +boolean is_high_quality
-        +int ref_length
-        +int alt_length
-        +string variant_type
-    }
-    class silver_gene_annotations {
-        +PK string gene_id
-        +string gene_name
-        +string gene_type
-        +string transcript_id
-        +string seqname
-        +string source
-        +string feature
-        +int start_pos
-        +int end_pos
-        +string score
-        +string strand
-        +string frame
-        +string attributes
-        +timestamp bronze_ingestion_timestamp
-        +string source_file
-        +timestamp silver_processing_timestamp
-        +int length
-    }
-    class silver_clinical_variants {
-        +PK int allele_id
-        +int variation_id
-        +string variant_type
-        +string gene_symbol
-        +FK int gene_id
-        +string clinical_significance
-        +string review_status
-        +FK string chromosome
-        +FK long start_pos
-        +long stop_pos
-        +string ref_allele
-        +string alt_allele
-        +string assembly
-        +string phenotype_ids
-        +string phenotype_list
-        +string origin
-        +int number_submitters
-        +string last_evaluated
-        +timestamp bronze_ingestion_timestamp
-        +string source_file
-        +timestamp silver_processing_timestamp
-    }
-    class gold_variant_summary {
-        +PK string chrom
-        +PK int pos
-        +PK string variant_id
-        +string ref_allele
-        +string alt_allele
-        +FK string gene_id
-        +string gene_name
-        +string gene_type
-        +string strand
-        +FK int clinvar_allele_id
-        +string clinical_significance
-        +string review_status
-        +string phenotype_list
-        +string clinvar_gene_symbol
-        +double quality_score
-        +boolean is_high_quality
-        +string variant_type
-        +string filter_status
-        +boolean has_clinical_annotation
-        +boolean has_gene_annotation
-        +timestamp gold_processing_timestamp
-    }
-    class gold_clinical_significance {
-        +string aggregation_type
-        +string clinical_significance
-        +string gene_name
-        +long variant_count
-        +long unique_genes
-        +long chromosomes_affected
-        +long snp_count
-        +long insertion_count
-        +long deletion_count
-        +double avg_quality_score
-        +double pct_of_clinical_variants
-        +int rank_in_category
-        +long unique_positions
-        +timestamp processing_timestamp
-    }
-    class gold_gene_hotspots {
-        +string gene_name
-        +long total_variants
-        +long snp_count
-        +long insertion_count
-        +long deletion_count
-        +long clinical_variants
-        +double avg_quality_score
-    }
+erDiagram
+    BRONZE_VCF ||--o{ SILVER_VCF : ingests
+    BRONZE_GTF ||--o{ SILVER_GTF : ingests
+    BRONZE_CLINVAR ||--o{ SILVER_CLINVAR : ingests
+    SILVER_VCF }o--|| SILVER_GTF : "range join (chrom, start_pos, end_pos)"
+    SILVER_VCF }o--|| SILVER_CLINVAR : "position join (chromosome, start_pos)"
+    SILVER_VCF ||--o{ GOLD_VARIANT_SUMMARY : enriches
+    SILVER_GTF ||--o{ GOLD_VARIANT_SUMMARY : enriches
+    SILVER_CLINVAR ||--o{ GOLD_VARIANT_SUMMARY : enriches
+    GOLD_VARIANT_SUMMARY ||--o{ GOLD_CLINICAL_SIG : aggregates
+    GOLD_VARIANT_SUMMARY ||--o{ GOLD_GENE_HOTSPOTS : aggregates
 
-    bronze_vcf_variants_raw --> silver_vcf_variants : ingest
-    bronze_gene_annotations_raw --> silver_gene_annotations : ingest
-    bronze_clinical_variants_raw --> silver_clinical_variants : ingest
-    silver_vcf_variants --> gold_variant_summary : chrom,pos join
-    silver_gene_annotations --> gold_variant_summary : seqname,start_pos,end_pos range join
-    silver_clinical_variants --> gold_variant_summary : chromosome,start_pos position join
-    gold_variant_summary --> gold_clinical_significance : derived
-    gold_variant_summary --> gold_gene_hotspots : derived
-
-    style bronze_vcf_variants_raw fill:#E6E6FA,stroke:#8B5CF6
-    style bronze_gene_annotations_raw fill:#E6E6FA,stroke:#8B5CF6
-    style bronze_clinical_variants_raw fill:#E6E6FA,stroke:#8B5CF6
-    style silver_vcf_variants fill:#E6E6FA,stroke:#8B5CF6
-    style silver_gene_annotations fill:#E6E6FA,stroke:#8B5CF6
-    style silver_clinical_variants fill:#E6E6FA,stroke:#8B5CF6
-    style gold_variant_summary fill:#E6E6FA,stroke:#8B5CF6
-    style gold_clinical_significance fill:#E6E6FA,stroke:#8B5CF6
-    style gold_gene_hotspots fill:#E6E6FA,stroke:#8B5CF6
+    BRONZE_VCF {
+        string raw_value
+        timestamp ingestion_timestamp
+        string source_file
+        string ingestion_id
+        date ingestion_date
+    }
+    BRONZE_GTF {
+        string raw_value
+        timestamp ingestion_timestamp
+        string source_file
+        string ingestion_id
+        date ingestion_date
+    }
+    BRONZE_CLINVAR {
+        int _AlleleID
+        int VariationID
+        string Type
+        string GeneSymbol
+        int GeneID
+        string ClinicalSignificance
+        string ReviewStatus
+        string Chromosome
+        long Start
+        long Stop
+        timestamp ingestion_timestamp
+    }
+    SILVER_VCF {
+        string chrom "PK"
+        int pos "PK"
+        string variant_id "PK"
+        string ref_allele
+        string alt_allele
+        double quality_score
+        string filter_status
+        boolean is_high_quality
+        string variant_type
+    }
+    SILVER_GTF {
+        string gene_id "PK"
+        string gene_name
+        string gene_type
+        string transcript_id
+        string seqname
+        int start_pos
+        int end_pos
+        string strand
+        int length
+    }
+    SILVER_CLINVAR {
+        int allele_id "PK"
+        string chromosome "FK"
+        long start_pos "FK"
+        string gene_symbol
+        int gene_id "FK"
+        string clinical_significance
+        string review_status
+        string phenotype_list
+    }
+    GOLD_VARIANT_SUMMARY {
+        string chrom "PK"
+        int pos "PK"
+        string variant_id "PK"
+        string gene_id "FK"
+        int clinvar_allele_id "FK"
+        string gene_name
+        string clinical_significance
+        boolean has_clinical_annotation
+        boolean has_gene_annotation
+    }
+    GOLD_CLINICAL_SIG {
+        string aggregation_type
+        string clinical_significance
+        string gene_name
+        long variant_count
+        long unique_genes
+        long snp_count
+        int rank_in_category
+    }
+    GOLD_GENE_HOTSPOTS {
+        string gene_name "PK"
+        long total_variants
+        long snp_count
+        long clinical_variants
+        double avg_quality_score
+    }
 ```
+
+---
+
+## Detailed Schema Tables
+
+### **BRONZE LAYER**
+
+#### bronze_vcf_variants_raw
+| Column Name | Type Cast | Key Type |
+|---|---|---|
+| raw_value | string | - |
+| ingestion_timestamp | timestamp | - |
+| source_file | string | - |
+| ingestion_id | string | - |
+| ingestion_date | date | Partition |
+
+#### bronze_gene_annotations_raw
+| Column Name | Type Cast | Key Type |
+|---|---|---|
+| raw_value | string | - |
+| ingestion_timestamp | timestamp | - |
+| source_file | string | - |
+| ingestion_id | string | - |
+| ingestion_date | date | Partition |
+
+#### bronze_clinical_variants_raw
+| Column Name | Type Cast | Key Type |
+|---|---|---|
+| _AlleleID | int | - |
+| VariationID | int | - |
+| Type | string | - |
+| GeneSymbol | string | - |
+| GeneID | int | - |
+| ClinicalSignificance | string | - |
+| ReviewStatus | string | - |
+| Chromosome | string | - |
+| Start | long | - |
+| Stop | long | - |
+| ReferenceAllele | string | - |
+| AlternateAllele | string | - |
+| Assembly | string | - |
+| PhenotypeList | string | - |
+| Origin | string | - |
+| NumberSubmitters | int | - |
+| ingestion_timestamp | timestamp | - |
+| source_file | string | - |
+| ingestion_id | string | - |
+| ingestion_date | date | Partition |
+
+---
+
+### **SILVER LAYER**
+
+#### silver_vcf_variants
+| Column Name | Type Cast | Key Type |
+|---|---|---|
+| chrom | string | PK |
+| pos | int | PK |
+| variant_id | string | PK |
+| ref_allele | string | - |
+| alt_allele | string | - |
+| quality_score | double | - |
+| filter_status | string | - |
+| info | string | - |
+| is_high_quality | boolean | - |
+| ref_length | int | - |
+| alt_length | int | - |
+| variant_type | string | - |
+| bronze_ingestion_timestamp | timestamp | - |
+| source_file | string | - |
+| silver_processing_timestamp | timestamp | - |
+
+**Partition By:** chrom
+
+**Joins To:**
+- `silver_gene_annotations` via **range join**: `chrom = seqname AND pos BETWEEN start_pos AND end_pos`
+- `silver_clinical_variants` via **position join**: `chrom = chromosome AND pos = start_pos`
+
+---
+
+#### silver_gene_annotations
+| Column Name | Type Cast | Key Type |
+|---|---|---|
+| gene_id | string | PK |
+| gene_name | string | - |
+| gene_type | string | - |
+| transcript_id | string | - |
+| seqname | string | - |
+| source | string | - |
+| feature | string | - |
+| start_pos | int | FK (to VCF) |
+| end_pos | int | - |
+| score | string | - |
+| strand | string | - |
+| frame | string | - |
+| length | int | - |
+| bronze_ingestion_timestamp | timestamp | - |
+| source_file | string | - |
+| silver_processing_timestamp | timestamp | - |
+
+**Partition By:** seqname
+
+**Joins To:**
+- `silver_vcf_variants` via **range join**: Referenced by VCF (chrom, pos)
+
+---
+
+#### silver_clinical_variants
+| Column Name | Type Cast | Key Type |
+|---|---|---|
+| allele_id | int | PK |
+| variation_id | int | - |
+| variant_type | string | - |
+| gene_symbol | string | - |
+| gene_id | int | FK (to Gene) |
+| clinical_significance | string | - |
+| review_status | string | - |
+| chromosome | string | FK (to VCF) |
+| start_pos | long | FK (to VCF) |
+| stop_pos | long | - |
+| ref_allele | string | - |
+| alt_allele | string | - |
+| assembly | string | - |
+| phenotype_ids | string | - |
+| phenotype_list | string | - |
+| origin | string | - |
+| number_submitters | int | - |
+| last_evaluated | string | - |
+| bronze_ingestion_timestamp | timestamp | - |
+| source_file | string | - |
+| silver_processing_timestamp | timestamp | - |
+
+**Partition By:** chromosome
+
+**Joins To:**
+- `silver_vcf_variants` via **position join**: `chromosome = chrom AND start_pos = pos`
+
+---
+
+### **GOLD LAYER**
+
+#### gold_variant_summary
+| Column Name | Type Cast | Key Type |
+|---|---|---|
+| chrom | string | PK |
+| pos | int | PK |
+| variant_id | string | PK |
+| ref_allele | string | - |
+| alt_allele | string | - |
+| gene_id | string | FK (to Gene) |
+| gene_name | string | - |
+| gene_type | string | - |
+| strand | string | - |
+| clinvar_allele_id | int | FK (to ClinVar) |
+| clinical_significance | string | - |
+| review_status | string | - |
+| phenotype_list | string | - |
+| clinvar_gene_symbol | string | - |
+| quality_score | double | - |
+| is_high_quality | boolean | - |
+| variant_type | string | - |
+| filter_status | string | - |
+| has_clinical_annotation | boolean | - |
+| has_gene_annotation | boolean | - |
+| gold_processing_timestamp | timestamp | - |
+
+**Partition By:** chrom
+
+**Optimization:** Z-ORDER BY (gene_name, clinical_significance)
+
+**Join Strategy:**
+- **VCF ↔ Gene (Range Join)**: `chrom = seqname AND pos BETWEEN start_pos AND end_pos`
+- **VCF ↔ ClinVar (Position Join)**: `chrom = chromosome AND pos = start_pos`
+
+---
+
+#### gold_clinical_significance
+| Column Name | Type Cast | Key Type |
+|---|---|---|
+| aggregation_type | string | - |
+| clinical_significance | string | - |
+| gene_name | string | - |
+| variant_count | long | - |
+| unique_genes | long | - |
+| chromosomes_affected | long | - |
+| snp_count | long | - |
+| insertion_count | long | - |
+| deletion_count | long | - |
+| avg_quality_score | double | - |
+| pct_of_clinical_variants | double | - |
+| rank_in_category | int | - |
+| unique_positions | long | - |
+| processing_timestamp | timestamp | - |
+
+**Partition By:** clinical_significance
+
+**Derived From:** gold_variant_summary (aggregation with GROUP BY)
+
+---
+
+#### gold_gene_hotspots
+| Column Name | Type Cast | Key Type |
+|---|---|---|
+| gene_name | string | PK |
+| total_variants | long | - |
+| snp_count | long | - |
+| insertion_count | long | - |
+| deletion_count | long | - |
+| clinical_variants | long | - |
+| avg_quality_score | double | - |
+
+**Partition By:** None (small table ~7K genes)
+
+**Derived From:** gold_variant_summary (aggregation by gene_name)
+
+---
 
 ### Schema Notes
 - Bronze tables store raw content plus ingestion audit metadata.
 - Silver tables are structured and enriched with parsed fields + processing timestamps.
 - `gold_variant_summary` is the core joined fact table.
-- Aggregation tables derive from `gold_variant_summary` for clinical and gene hotspot analytics.
+- **FK = Foreign Key** (join reference), **PK = Primary Key** (unique identifier)
+- **Range Join**: Variant position falls within gene boundaries
+- **Position Join**: Variant chromosome + position matches clinical variant records
 
 ### Schema Notes
 - Bronze tables store raw content plus ingestion audit metadata.
