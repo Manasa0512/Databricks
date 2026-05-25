@@ -57,3 +57,169 @@ flowchart TD
 - Bronze layer ingests raw genomic files with audit metadata and partitions by `ingestion_date`.
 - Silver layer parses and validates raw text into structured Delta tables.
 - Gold layer enriches variants, aggregates clinical significance, and ranks gene hotspots.
+
+## Schema Diagram
+
+```mermaid
+classDiagram
+    class bronze_vcf_variants_raw {
+        +string raw_value
+        +timestamp ingestion_timestamp
+        +string source_file
+        +string ingestion_id
+        +date ingestion_date
+    }
+    class bronze_gene_annotations_raw {
+        +string raw_value
+        +timestamp ingestion_timestamp
+        +string source_file
+        +string ingestion_id
+        +date ingestion_date
+    }
+    class bronze_clinical_variants_raw {
+        +int _AlleleID
+        +int VariationID
+        +string Type
+        +string GeneSymbol
+        +int GeneID
+        +string ClinicalSignificance
+        +string ReviewStatus
+        +string Chromosome
+        +long Start
+        +long Stop
+        +string ReferenceAllele
+        +string AlternateAllele
+        +string Assembly
+        +string PhenotypeIDS
+        +string PhenotypeList
+        +string Origin
+        +int NumberSubmitters
+        +string LastEvaluated
+        +timestamp ingestion_timestamp
+        +string source_file
+        +string ingestion_id
+        +date ingestion_date
+    }
+    class silver_vcf_variants {
+        +string chrom
+        +int pos
+        +string variant_id
+        +string ref_allele
+        +string alt_allele
+        +double quality_score
+        +string filter_status
+        +string info
+        +timestamp bronze_ingestion_timestamp
+        +string source_file
+        +timestamp silver_processing_timestamp
+        +boolean is_high_quality
+        +int ref_length
+        +int alt_length
+        +string variant_type
+    }
+    class silver_gene_annotations {
+        +string seqname
+        +string source
+        +string feature
+        +int start_pos
+        +int end_pos
+        +string score
+        +string strand
+        +string frame
+        +string attributes
+        +timestamp bronze_ingestion_timestamp
+        +string source_file
+        +timestamp silver_processing_timestamp
+        +string gene_id
+        +string gene_name
+        +string gene_type
+        +string transcript_id
+        +int length
+    }
+    class silver_clinical_variants {
+        +int allele_id
+        +int variation_id
+        +string variant_type
+        +string gene_symbol
+        +int gene_id
+        +string clinical_significance
+        +string review_status
+        +string chromosome
+        +long start_pos
+        +long stop_pos
+        +string ref_allele
+        +string alt_allele
+        +string assembly
+        +string phenotype_ids
+        +string phenotype_list
+        +string origin
+        +int number_submitters
+        +string last_evaluated
+        +timestamp bronze_ingestion_timestamp
+        +string source_file
+        +timestamp silver_processing_timestamp
+    }
+    class gold_variant_summary {
+        +string chrom
+        +int pos
+        +string variant_id
+        +string ref_allele
+        +string alt_allele
+        +string gene_id
+        +string gene_name
+        +string gene_type
+        +string strand
+        +int clinvar_allele_id
+        +string clinical_significance
+        +string review_status
+        +string phenotype_list
+        +string clinvar_gene_symbol
+        +double quality_score
+        +boolean is_high_quality
+        +string variant_type
+        +string filter_status
+        +boolean has_clinical_annotation
+        +boolean has_gene_annotation
+        +timestamp gold_processing_timestamp
+    }
+    class gold_clinical_significance {
+        +string aggregation_type
+        +string clinical_significance
+        +string gene_name
+        +long variant_count
+        +long unique_genes
+        +long chromosomes_affected
+        +long snp_count
+        +long insertion_count
+        +long deletion_count
+        +double avg_quality_score
+        +double pct_of_clinical_variants
+        +int rank_in_category
+        +long unique_positions
+        +timestamp processing_timestamp
+    }
+    class gold_gene_hotspots {
+        +string gene_name
+        +long total_variants
+        +long snp_count
+        +long insertion_count
+        +long deletion_count
+        +long clinical_variants
+        +double avg_quality_score
+    }
+
+    bronze_vcf_variants_raw --> silver_vcf_variants
+    bronze_gene_annotations_raw --> silver_gene_annotations
+    bronze_clinical_variants_raw --> silver_clinical_variants
+    silver_vcf_variants --> gold_variant_summary
+    silver_gene_annotations --> gold_variant_summary
+    silver_clinical_variants --> gold_variant_summary
+    gold_variant_summary --> gold_clinical_significance
+    gold_variant_summary --> gold_gene_hotspots
+```
+
+### Schema Notes
+- Bronze tables store raw content plus ingestion audit metadata.
+- Silver tables are structured and enriched with parsed fields + processing timestamps.
+- `gold_variant_summary` is the core joined fact table.
+- Aggregation tables derive from `gold_variant_summary` for clinical and gene hotspot analytics.
