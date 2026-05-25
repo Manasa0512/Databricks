@@ -101,9 +101,9 @@ classDiagram
         +date ingestion_date
     }
     class silver_vcf_variants {
-        +string chrom
-        +int pos
-        +string variant_id
+        +PK string chrom
+        +PK int pos
+        +PK string variant_id
         +string ref_allele
         +string alt_allele
         +double quality_score
@@ -118,6 +118,10 @@ classDiagram
         +string variant_type
     }
     class silver_gene_annotations {
+        +PK string gene_id
+        +string gene_name
+        +string gene_type
+        +string transcript_id
         +string seqname
         +string source
         +string feature
@@ -130,22 +134,18 @@ classDiagram
         +timestamp bronze_ingestion_timestamp
         +string source_file
         +timestamp silver_processing_timestamp
-        +string gene_id
-        +string gene_name
-        +string gene_type
-        +string transcript_id
         +int length
     }
     class silver_clinical_variants {
-        +int allele_id
+        +PK int allele_id
         +int variation_id
         +string variant_type
         +string gene_symbol
-        +int gene_id
+        +FK int gene_id
         +string clinical_significance
         +string review_status
-        +string chromosome
-        +long start_pos
+        +FK string chromosome
+        +FK long start_pos
         +long stop_pos
         +string ref_allele
         +string alt_allele
@@ -160,16 +160,16 @@ classDiagram
         +timestamp silver_processing_timestamp
     }
     class gold_variant_summary {
-        +string chrom
-        +int pos
-        +string variant_id
+        +PK string chrom
+        +PK int pos
+        +PK string variant_id
         +string ref_allele
         +string alt_allele
-        +string gene_id
+        +FK string gene_id
         +string gene_name
         +string gene_type
         +string strand
-        +int clinvar_allele_id
+        +FK int clinvar_allele_id
         +string clinical_significance
         +string review_status
         +string phenotype_list
@@ -208,15 +208,31 @@ classDiagram
         +double avg_quality_score
     }
 
-    bronze_vcf_variants_raw --> silver_vcf_variants
-    bronze_gene_annotations_raw --> silver_gene_annotations
-    bronze_clinical_variants_raw --> silver_clinical_variants
-    silver_vcf_variants --> gold_variant_summary
-    silver_gene_annotations --> gold_variant_summary
-    silver_clinical_variants --> gold_variant_summary
-    gold_variant_summary --> gold_clinical_significance
-    gold_variant_summary --> gold_gene_hotspots
+    bronze_vcf_variants_raw --> silver_vcf_variants : ingest
+    bronze_gene_annotations_raw --> silver_gene_annotations : ingest
+    bronze_clinical_variants_raw --> silver_clinical_variants : ingest
+    silver_vcf_variants --> gold_variant_summary : chrom,pos join
+    silver_gene_annotations --> gold_variant_summary : seqname,start_pos,end_pos range join
+    silver_clinical_variants --> gold_variant_summary : chromosome,start_pos position join
+    gold_variant_summary --> gold_clinical_significance : derived
+    gold_variant_summary --> gold_gene_hotspots : derived
+
+    style bronze_vcf_variants_raw fill:#E6E6FA,stroke:#8B5CF6
+    style bronze_gene_annotations_raw fill:#E6E6FA,stroke:#8B5CF6
+    style bronze_clinical_variants_raw fill:#E6E6FA,stroke:#8B5CF6
+    style silver_vcf_variants fill:#E6E6FA,stroke:#8B5CF6
+    style silver_gene_annotations fill:#E6E6FA,stroke:#8B5CF6
+    style silver_clinical_variants fill:#E6E6FA,stroke:#8B5CF6
+    style gold_variant_summary fill:#E6E6FA,stroke:#8B5CF6
+    style gold_clinical_significance fill:#E6E6FA,stroke:#8B5CF6
+    style gold_gene_hotspots fill:#E6E6FA,stroke:#8B5CF6
 ```
+
+### Schema Notes
+- Bronze tables store raw content plus ingestion audit metadata.
+- Silver tables are structured and enriched with parsed fields + processing timestamps.
+- `gold_variant_summary` is the core joined fact table.
+- Aggregation tables derive from `gold_variant_summary` for clinical and gene hotspot analytics.
 
 ### Schema Notes
 - Bronze tables store raw content plus ingestion audit metadata.
