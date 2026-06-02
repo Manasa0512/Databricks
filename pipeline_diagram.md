@@ -13,6 +13,7 @@ This document now reflects the latest Databricks pipeline design and presents:
 ## Pipeline Flow
 
 ```mermaid
+%%{init: {"theme":"dark"}}%%
 flowchart TD
     subgraph Bronze[Bronze Layer]
       B1[VCF Raw Text]
@@ -85,132 +86,132 @@ flowchart TD
 ## Dimension Tables
 
 ### dim_variant
-| Column | Type | Description |
-|---|---|---|
-| variant_key | string | Surrogate key for each unique variant |
-| chrom | string | Chromosome code |
-| pos | int | Variant genomic position |
-| variant_id | string | VCF ID or generated identifier |
-| ref_allele | string | Reference allele |
-| alt_allele | string | Alternate allele |
-| variant_type | string | SNP, INSERTION, DELETION, COMPLEX |
-| quality_score | double | VCF QUAL score |
-| filter_status | string | VCF FILTER field |
-| is_high_quality | boolean | `filter_status == 'PASS'` |
-| bronze_ingestion_timestamp | timestamp | Bronze ingestion metadata |
-| source_file | string | Original source filename |
+| Column Name | Type Cast | Key Type |
+|---|---:|---:|
+| variant_key | string | Surrogate Key |
+| chrom | string | - |
+| pos | int | - |
+| variant_id | string | - |
+| ref_allele | string | - |
+| alt_allele | string | - |
+| variant_type | string | - |
+| quality_score | double | - |
+| filter_status | string | - |
+| is_high_quality | boolean | - |
+| bronze_ingestion_timestamp | timestamp | - |
+| source_file | string | - |
 
 ### dim_gene
-| Column | Type | Description |
-|---|---|---|
-| gene_key | string | Surrogate key for each gene |
-| gene_id | string | Gene identifier from GTF |
-| gene_name | string | Standard gene symbol |
-| gene_type | string | Gene biotype |
-| seqname | string | Chromosome or contig |
-| start_pos | int | Gene start coordinate |
-| end_pos | int | Gene end coordinate |
-| strand | string | `+` or `-` |
-| length | int | End minus start + 1 |
-| annotation_source | string | Source system, e.g. GENCODE v49 |
+| Column Name | Type Cast | Key Type |
+|---|---:|---:|
+| gene_key | string | Surrogate Key |
+| gene_id | string | - |
+| gene_name | string | - |
+| gene_type | string | - |
+| seqname | string | - |
+| start_pos | int | - |
+| end_pos | int | - |
+| strand | string | - |
+| length | int | - |
+| annotation_source | string | - |
 
 ### dim_clinvar_annotation
-| Column | Type | Description |
-|---|---|---|
-| clinvar_key | string | Surrogate key for ClinVar annotation |
-| allele_id | int | ClinVar AlleleID |
-| variation_id | int | ClinVar VariationID |
-| chromosome | string | Chromosome code |
-| start_pos | long | Variant start position |
-| gene_symbol | string | Reported gene symbol |
-| gene_id | int | Gene ID if available |
-| clinical_significance | string | Pathogenicity label |
-| review_status | string | ClinVar review status |
-| phenotype_list | string | Associated phenotypes |
-| pathogenicity_group | string | Normalized clinical class |
+| Column Name | Type Cast | Key Type |
+|---|---:|---:|
+| clinvar_key | string | Surrogate Key |
+| allele_id | int | - |
+| variation_id | int | - |
+| chromosome | string | - |
+| start_pos | long | - |
+| gene_symbol | string | - |
+| gene_id | int | - |
+| clinical_significance | string | - |
+| review_status | string | - |
+| phenotype_list | string | - |
+| pathogenicity_group | string | - |
 
 ### dim_region
-| Column | Type | Description |
-|---|---|---|
-| region_key | string | Surrogate key for a geopolitical/analysis region |
-| region_name | string | Name (e.g. Africa, Europe, Asia, Americas, Oceania) |
-| region_code | string | Short code (e.g. AF, EU, AS, AM, OC) |
-| description | string | Optional human-readable description |
-| source_population | string | Source of region mapping (metadata source)
+| Column Name | Type Cast | Key Type |
+|---|---:|---:|
+| region_key | string | Surrogate Key |
+| region_name | string | - |
+| region_code | string | - |
+| description | string | - |
+| source_population | string | - |
 
 ---
 
 ## Fact Tables
 
 ### fact_variant_annotation
-| Column | Type | Description |
-|---|---|---|
-| fact_variant_key | string | Surrogate fact row key |
-| variant_key | string | FK to `dim_variant` |
-| gene_key | string | FK to `dim_gene` |
-| clinvar_key | string | FK to `dim_clinvar_annotation` |
-| chrom | string | Chromosome code |
-| pos | int | Variant position |
-| variant_id | string | VCF variant identifier |
-| gene_id | string | Gene identifier mapped via range join |
-| gene_name | string | Gene symbol mapped via gene annotation |
-| clinical_significance | string | ClinVar annotation captured from the join |
-| has_gene_annotation | boolean | Whether gene mapping exists |
-| has_clinical_annotation | boolean | Whether ClinVar annotation exists |
-| num_clinvar_evidence | int | Count of ClinVar records per variant |
-| avg_quality_score | double | Quality score for the variant |
-| processed_timestamp | timestamp | Gold processing event time |
-| region_key | string | FK to `dim_region` to indicate sample/analysis region |
-| region_name | string | Denormalized region name (for query convenience) |
-| sample_population | string | Population or cohort label mapped to region |
+| Column Name | Type Cast | Key Type |
+|---|---:|---:|
+| fact_variant_key | string | Surrogate Key |
+| variant_key | string | FK |
+| gene_key | string | FK |
+| clinvar_key | string | FK |
+| chrom | string | - |
+| pos | int | - |
+| variant_id | string | - |
+| gene_id | string | - |
+| gene_name | string | - |
+| clinical_significance | string | - |
+| has_gene_annotation | boolean | - |
+| has_clinical_annotation | boolean | - |
+| num_clinvar_evidence | int | - |
+| avg_quality_score | double | - |
+| processed_timestamp | timestamp | - |
+| region_key | string | FK |
+| region_name | string | - |
+| sample_population | string | - |
 
 ### gold_clinical_significance
-| Column | Type | Description |
-|---|---|---|
-| clinical_significance | string | ClinVar grouping |
-| total_variants | long | Number of variants with this label |
-| unique_genes | long | Distinct genes impacted |
-| distinct_positions | long | Distinct genomic positions |
-| avg_quality_score | double | Average VCF quality for this group |
-| pathogenic_variant_ratio | double | Percent of variants labeled pathogenic |
-| rank_by_burden | int | Rank within clinical class |
+| Column Name | Type Cast | Key Type |
+|---|---:|---:|
+| clinical_significance | string | - |
+| total_variants | long | - |
+| unique_genes | long | - |
+| distinct_positions | long | - |
+| avg_quality_score | double | - |
+| pathogenic_variant_ratio | double | - |
+| rank_by_burden | int | - |
 
 ### gold_clinical_significance_by_region
-| Column | Type | Description |
-|---|---|---|
-| region_key | string | FK to `dim_region` |
-| region_name | string | Denormalized region name |
-| clinical_significance | string | ClinVar grouping |
-| total_variants | long | Number of variants with this label in region |
-| unique_genes | long | Distinct genes impacted in region |
-| avg_quality_score | double | Average VCF quality for region/class |
-| pathogenic_variant_ratio | double | Percent pathogenic in region |
-| rank_by_burden | int | Rank within region and clinical class |
+| Column Name | Type Cast | Key Type |
+|---|---:|---:|
+| region_key | string | FK |
+| region_name | string | - |
+| clinical_significance | string | - |
+| total_variants | long | - |
+| unique_genes | long | - |
+| avg_quality_score | double | - |
+| pathogenic_variant_ratio | double | - |
+| rank_by_burden | int | - |
 
 ### gold_gene_hotspots
-| Column | Type | Description |
-|---|---|---|
-| gene_key | string | FK to `dim_gene` |
-| gene_name | string | Gene symbol |
-| gene_type | string | Biotype |
-| total_variants | long | Number of variants mapped to gene |
-| clinical_variants | long | Variants with clinical annotation |
-| snp_count | long | Count of SNPs |
-| indel_count | long | Count of insertions/deletions |
-| avg_quality_score | double | Mean VCF quality score |
-| hotspot_rank | int | Dense rank by variant burden |
+| Column Name | Type Cast | Key Type |
+|---|---:|---:|
+| gene_key | string | FK |
+| gene_name | string | - |
+| gene_type | string | - |
+| total_variants | long | - |
+| clinical_variants | long | - |
+| snp_count | long | - |
+| indel_count | long | - |
+| avg_quality_score | double | - |
+| hotspot_rank | int | - |
 
 ### gold_gene_hotspots_by_region
-| Column | Type | Description |
-|---|---|---|
-| region_key | string | FK to `dim_region` |
-| region_name | string | Denormalized region name |
-| gene_key | string | FK to `dim_gene` |
-| gene_name | string | Gene symbol |
-| total_variants | long | Number of variants mapped to gene in region |
-| clinical_variants | long | Variants with clinical annotation in region |
-| avg_quality_score | double | Mean VCF quality for gene in region |
-| hotspot_rank | int | Dense rank by variant burden within region |
+| Column Name | Type Cast | Key Type |
+|---|---:|---:|
+| region_key | string | FK |
+| region_name | string | - |
+| gene_key | string | FK |
+| gene_name | string | - |
+| total_variants | long | - |
+| clinical_variants | long | - |
+| avg_quality_score | double | - |
+| hotspot_rank | int | - |
 
 ---
 
@@ -225,9 +226,47 @@ flowchart TD
 
 ---
 
+## Joins (explicit)
+
+- VCF → GTF (range join):
+
+```sql
+-- Map variants to genes
+SELECT v.*, g.gene_key, g.gene_name
+FROM silver_vcf_variants v
+JOIN silver_gene_annotations g
+  ON v.chrom = g.seqname
+  AND v.pos BETWEEN g.start_pos AND g.end_pos
+```
+
+- VCF → ClinVar (position join):
+
+```sql
+-- Attach clinical annotations by position
+SELECT v.*, c.clinvar_key, c.clinical_significance
+FROM silver_vcf_variants v
+LEFT JOIN silver_clinical_variants c
+  ON v.chrom = c.chromosome
+  AND v.pos = c.start_pos
+```
+
+- Fact → Dimensions (FK joins):
+
+```sql
+SELECT f.*, dv.*, dg.*, dc.*, dr.region_name
+FROM fact_variant_annotation f
+LEFT JOIN dim_variant dv ON f.variant_key = dv.variant_key
+LEFT JOIN dim_gene dg ON f.gene_key = dg.gene_key
+LEFT JOIN dim_clinvar_annotation dc ON f.clinvar_key = dc.clinvar_key
+LEFT JOIN dim_region dr ON f.region_key = dr.region_key
+```
+
+---
+
 ## Compact Pipeline Diagram
 
 ```mermaid
+%%{init: {"theme":"dark"}}%%
 flowchart LR
   Bronze((Bronze)) -->|ingest| Silver((Silver))
   Silver -->|transform & enrich| Gold((Gold))
@@ -265,6 +304,7 @@ flowchart LR
 ## Schema ER Diagram (compact)
 
 ```mermaid
+%%{init: {"theme":"dark"}}%%
 erDiagram
   DIM_VARIANT ||--o{ FACT_VARIANT : "variant_key -> variant_key"
   DIM_GENE ||--o{ FACT_VARIANT : "gene_key -> gene_key"
