@@ -292,10 +292,14 @@ flowchart LR
   b_vcf --> s_vcf
   b_gtf --> s_gtf
   b_clin --> s_clin
+
+  s_vcf -->|range join| s_gtf
+  s_vcf -->|position join| s_clin
+
   s_vcf --> dim
   s_gtf --> dim
   s_clin --> dim
-  dim --> fact
+  dim -->|FK joins| fact
   fact --> agg
 ```
 
