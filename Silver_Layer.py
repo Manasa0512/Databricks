@@ -21,6 +21,74 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,Pipeline Pseudocode
+# MAGIC %md
+# MAGIC # Silver Layer Pseudocode
+# MAGIC
+# MAGIC ```
+# MAGIC {
+# MAGIC   START Silver Layer Transformation
+# MAGIC   
+# MAGIC   STEP 1: Configure table names
+# MAGIC   {
+# MAGIC     SET bronze_tables = [bronze_vcf, bronze_gtf, bronze_clinvar]
+# MAGIC     SET silver_tables = [silver_vcf_variants, silver_gene_annotations, silver_clinical_variants]
+# MAGIC   }
+# MAGIC   
+# MAGIC   STEP 2: Transform VCF Variants
+# MAGIC   {
+# MAGIC     READ bronze_vcf_variants_raw
+# MAGIC     FILTER rows (exclude header lines starting with #)
+# MAGIC     PARSE raw_value into columns (chrom, pos, id, ref, alt, qual, filter, info)
+# MAGIC     CAST data types (pos → int, qual → double)
+# MAGIC     ADD variant_classification (SNP, INDEL, MNP)
+# MAGIC     VALIDATE data (non-null chromosomes, positive positions)
+# MAGIC     WRITE to silver_vcf_variants (partitioned by chrom)
+# MAGIC   }
+# MAGIC   
+# MAGIC   STEP 3: Transform Gene Annotations (GTF)
+# MAGIC   {
+# MAGIC     READ bronze_gene_annotations_raw
+# MAGIC     FILTER rows (exclude header lines starting with #)
+# MAGIC     PARSE raw_value into 9 GTF columns (seqname, source, feature, start, end, score, strand, frame, attributes)
+# MAGIC     CAST data types (start/end → int, score → double)
+# MAGIC     EXTRACT gene attributes (gene_id, gene_name, gene_type)
+# MAGIC     VALIDATE data (start < end, valid strand)
+# MAGIC     WRITE to silver_gene_annotations (partitioned by seqname)
+# MAGIC   }
+# MAGIC   
+# MAGIC   STEP 4: Transform ClinVar Clinical Variants
+# MAGIC   {
+# MAGIC     READ bronze_clinical_variants_raw
+# MAGIC     CAST columns to proper types (integers, doubles)
+# MAGIC     CLEAN numeric fields (replace -1 and empty strings with NULL)
+# MAGIC     VALIDATE required fields (GeneSymbol, ClinicalSignificance not null)
+# MAGIC     FILTER invalid records
+# MAGIC     WRITE to silver_clinical_variants (partitioned by Chromosome)
+# MAGIC   }
+# MAGIC   
+# MAGIC   STEP 5: Verify transformations
+# MAGIC   {
+# MAGIC     LIST all silver tables
+# MAGIC     COUNT records in each table
+# MAGIC     VERIFY schema and data types
+# MAGIC     SHOW sample records
+# MAGIC   }
+# MAGIC   
+# MAGIC   ERROR HANDLING
+# MAGIC   {
+# MAGIC     IF transformation_fails THEN
+# MAGIC       ROLLBACK changes
+# MAGIC       PRINT error details
+# MAGIC     END IF
+# MAGIC   }
+# MAGIC   
+# MAGIC   END Silver Layer Transformation
+# MAGIC }
+# MAGIC ```
+
+# COMMAND ----------
+
 # DBTITLE 1,Configuration
 from pyspark.sql.functions import (
     col, split, current_timestamp, when, length, trim, regexp_extract
@@ -37,7 +105,7 @@ SILVER_VCF = "workspace.genomics_project.silver_vcf_variants"
 SILVER_GTF = "workspace.genomics_project.silver_gene_annotations"
 SILVER_CLINVAR = "workspace.genomics_project.silver_clinical_variants"
 
-print("✅ Configuration loaded")
+print("[OK] Configuration loaded")
 
 # COMMAND ----------
 
@@ -49,22 +117,22 @@ print("✅ Configuration loaded")
 # COMMAND ----------
 
 # DBTITLE 1,Transform VCF to Silver
-print("🧬 SILVER TRANSFORMATION: VCF Variants")
+print("SILVER TRANSFORMATION: VCF Variants")
 print("="*70)
 
 try:
     # Read Bronze
-    print("\n📂 Reading Bronze VCF...")
+    print("\nReading Bronze VCF...")
     bronze_vcf = spark.table(BRONZE_VCF)
-    print(f"✅ Loaded {bronze_vcf.count():,} records")
+    print(f"[OK] Loaded {bronze_vcf.count():,} records")
     
     # Filter data lines
-    print("🧹 Filtering data lines...")
+    print("Filtering data lines...")
     vcf_data = bronze_vcf.filter(~col("raw_value").startswith("#"))
-    print(f"✅ Data lines: {vcf_data.count():,}")
+    print(f"[OK] Data lines: {vcf_data.count():,}")
     
     # Parse VCF columns
-    print("✂️ Parsing VCF format...")
+    print("Parsing VCF format...")
     vcf_parsed = vcf_data.select(
         split(col("raw_value"), "\t").getItem(0).alias("chrom"),
         split(col("raw_value"), "\t").getItem(1).cast(IntegerType()).alias("pos"),
@@ -80,7 +148,7 @@ try:
     )
     
     # Add quality flags and variant type
-    print("✅ Adding variant classification...")
+    print("[OK] Adding variant classification...")
     silver_vcf = vcf_parsed \
         .withColumn("is_high_quality", when(col("filter_status") == "PASS", True).otherwise(False)) \
         .withColumn("ref_length", length(col("ref_allele"))) \
@@ -94,14 +162,14 @@ try:
         )
     
     # Validation
-    print("🔍 Validating data...")
+    print("Validating data...")
     null_check = silver_vcf.filter(col("chrom").isNull() | col("pos").isNull()).count()
     if null_check > 0:
         raise ValueError(f"Validation failed: {null_check} records with null chrom/pos")
-    print("✅ Validation passed")
+    print("[OK] Validation passed")
     
     # Write to Silver
-    print("\n💾 Writing to Silver...")
+    print("\nWriting to Silver...")
     silver_vcf.write \
         .format("delta") \
         .mode("overwrite") \
@@ -110,12 +178,12 @@ try:
         .saveAsTable(SILVER_VCF)
     
     final_count = spark.table(SILVER_VCF).count()
-    print(f"\n✅ SUCCESS: {final_count:,} records written to {SILVER_VCF}")
+    print(f"\n[SUCCESS] {final_count:,} records written to {SILVER_VCF}")
     print("="*70)
     
 except Exception as e:
-    print(f"\n❌ ERROR: {str(e)}")
-    print("🔄 ROLLBACK: Previous table version preserved")
+    print(f"\n[ERROR] {str(e)}")
+    print("[ROLLBACK] Previous table version preserved")
     print("="*70)
     raise
 
@@ -129,22 +197,22 @@ except Exception as e:
 # COMMAND ----------
 
 # DBTITLE 1,Transform GTF to Silver
-print("🧠 SILVER TRANSFORMATION: Gene Annotations")
+print("SILVER TRANSFORMATION: Gene Annotations")
 print("="*70)
 
 try:
     # Read Bronze
-    print("\n📂 Reading Bronze GTF...")
+    print("\nReading Bronze GTF...")
     bronze_gtf = spark.table(BRONZE_GTF)
-    print(f"✅ Loaded {bronze_gtf.count():,} records")
+    print(f"[OK] Loaded {bronze_gtf.count():,} records")
     
     # Filter data lines
-    print("🧹 Filtering data lines...")
+    print("Filtering data lines...")
     gtf_data = bronze_gtf.filter(~col("raw_value").startswith("#"))
-    print(f"✅ Data lines: {gtf_data.count():,}")
+    print(f"[OK] Data lines: {gtf_data.count():,}")
     
     # Parse GTF columns
-    print("✂️ Parsing GTF format...")
+    print("Parsing GTF format...")
     gtf_parsed = gtf_data.select(
         split(col("raw_value"), "\t").getItem(0).alias("seqname"),
         split(col("raw_value"), "\t").getItem(1).alias("source"),
@@ -161,7 +229,7 @@ try:
     )
     
     # Extract gene attributes
-    print("✅ Extracting gene attributes...")
+    print("[OK] Extracting gene attributes...")
     silver_gtf = gtf_parsed \
         .withColumn("gene_id", regexp_extract(col("attributes"), r'gene_id "([^"]+)"', 1)) \
         .withColumn("gene_name", regexp_extract(col("attributes"), r'gene_name "([^"]+)"', 1)) \
@@ -170,14 +238,14 @@ try:
         .withColumn("length", col("end_pos") - col("start_pos") + 1)
     
     # Validation
-    print("🔍 Validating data...")
+    print("Validating data...")
     null_check = silver_gtf.filter(col("seqname").isNull() | col("start_pos").isNull()).count()
     if null_check > 0:
         raise ValueError(f"Validation failed: {null_check} records with null seqname/positions")
-    print("✅ Validation passed")
+    print("[OK] Validation passed")
     
     # Write to Silver
-    print("\n💾 Writing to Silver...")
+    print("\nWriting to Silver...")
     silver_gtf.write \
         .format("delta") \
         .mode("overwrite") \
@@ -186,12 +254,12 @@ try:
         .saveAsTable(SILVER_GTF)
     
     final_count = spark.table(SILVER_GTF).count()
-    print(f"\n✅ SUCCESS: {final_count:,} records written to {SILVER_GTF}")
+    print(f"\n[SUCCESS] {final_count:,} records written to {SILVER_GTF}")
     print("="*70)
     
 except Exception as e:
-    print(f"\n❌ ERROR: {str(e)}")
-    print("🔄 ROLLBACK: Previous table version preserved")
+    print(f"\n[ERROR] {str(e)}")
+    print("[ROLLBACK] Previous table version preserved")
     print("="*70)
     raise
 
@@ -205,14 +273,14 @@ except Exception as e:
 # COMMAND ----------
 
 # DBTITLE 1,Transform ClinVar to Silver
-print("⚕️ SILVER TRANSFORMATION: ClinVar Clinical Variants")
+print("SILVER TRANSFORMATION: ClinVar Clinical Variants")
 print("="*70)
 
 try:
     # Read Bronze
-    print("\n📂 Reading Bronze ClinVar...")
+    print("\nReading Bronze ClinVar...")
     bronze_clinvar = spark.table(BRONZE_CLINVAR)
-    print(f"✅ Loaded {bronze_clinvar.count():,} records")
+    print(f"[OK] Loaded {bronze_clinvar.count():,} records")
     
     # Helper function for numeric cleaning
     def clean_numeric(column_name, cast_type):
@@ -222,7 +290,7 @@ try:
         ).otherwise(col(column_name).cast(cast_type))
     
     # Type cast columns
-    print("🔄 Type casting columns...")
+    print("Type casting columns...")
     silver_clinvar = bronze_clinvar.select(
         # Primary identifiers
         clean_numeric("_AlleleID", IntegerType()).alias("allele_id"),
@@ -263,7 +331,7 @@ try:
     )
     
     # Validation and filtering
-    print("✅ Validating and filtering...")
+    print("[OK] Validating and filtering...")
     valid_chromosomes = [str(i) for i in range(1, 23)] + ["X", "Y", "MT"]
     
     silver_clinvar_validated = silver_clinvar \
@@ -272,10 +340,10 @@ try:
         .dropDuplicates(["allele_id"])
     
     validated_count = silver_clinvar_validated.count()
-    print(f"✅ Valid records: {validated_count:,}")
+    print(f"[OK] Valid records: {validated_count:,}")
     
     # Write to Silver
-    print("\n💾 Writing to Silver...")
+    print("\nWriting to Silver...")
     silver_clinvar_validated.write \
         .format("delta") \
         .mode("overwrite") \
@@ -284,12 +352,12 @@ try:
         .saveAsTable(SILVER_CLINVAR)
     
     final_count = spark.table(SILVER_CLINVAR).count()
-    print(f"\n✅ SUCCESS: {final_count:,} records written to {SILVER_CLINVAR}")
+    print(f"\n[SUCCESS] {final_count:,} records written to {SILVER_CLINVAR}")
     print("="*70)
     
 except Exception as e:
-    print(f"\n❌ ERROR: {str(e)}")
-    print("🔄 ROLLBACK: Previous table version preserved")
+    print(f"\n[ERROR] {str(e)}")
+    print("[ROLLBACK] Previous table version preserved")
     print("="*70)
     raise
 
@@ -303,21 +371,21 @@ except Exception as e:
 # COMMAND ----------
 
 # DBTITLE 1,Verify Silver Layer
-print("🔍 SILVER LAYER VERIFICATION")
+print("SILVER LAYER VERIFICATION")
 print("="*70)
 
 CATALOG = "workspace"
 SCHEMA = "genomics_project"
 
 # Check 1: List tables
-print("\n📋 Check 1: Silver Tables")
+print("\nCheck 1: Silver Tables")
 print("-" * 70)
 silver_tables = spark.sql(f"SHOW TABLES IN {CATALOG}.{SCHEMA} LIKE 'silver*'").collect()
 for tbl in silver_tables:
-    print(f"   ✅ {tbl.tableName}")
+    print(f"   [OK] {tbl.tableName}")
 
 # Check 2: Record counts
-print("\n📊 Check 2: Record Counts")
+print("\nCheck 2: Record Counts")
 print("-" * 70)
 
 vcf_count = spark.sql(f"SELECT COUNT(*) as cnt FROM {SILVER_VCF}").first()[0]
@@ -329,42 +397,42 @@ print(f"   Gene Annotations: {gtf_count:,}")
 print(f"   Clinical Variants: {clinvar_count:,}")
 
 # Check 3: Schema types
-print("\n🔍 Check 3: Schema Verification (First 8 Fields)")
+print("\nCheck 3: Schema Verification (First 8 Fields)")
 print("-" * 70)
 
 print("\n   VCF Schema:")
 for field in spark.table(SILVER_VCF).schema.fields[:8]:
-    print(f"     • {field.name}: {field.dataType}")
+    print(f"     - {field.name}: {field.dataType}")
 
 print("\n   GTF Schema:")
 for field in spark.table(SILVER_GTF).schema.fields[:8]:
-    print(f"     • {field.name}: {field.dataType}")
+    print(f"     - {field.name}: {field.dataType}")
 
 print("\n   ClinVar Schema:")
 for field in spark.table(SILVER_CLINVAR).schema.fields[:8]:
-    print(f"     • {field.name}: {field.dataType}")
+    print(f"     - {field.name}: {field.dataType}")
 
 # Check 4: Data quality metrics
-print("\n✅ Check 4: Data Quality Metrics")
+print("\nCheck 4: Data Quality Metrics")
 print("-" * 70)
 
 print("\n   VCF Variant Types:")
 variant_types = spark.sql(f"SELECT variant_type, COUNT(*) as count FROM {SILVER_VCF} GROUP BY variant_type ORDER BY count DESC").collect()
 for row in variant_types:
-    print(f"     • {row.variant_type}: {row['count']:,}")
+    print(f"     - {row.variant_type}: {row['count']:,}")
 
 print("\n   ClinVar Clinical Significance (Top 5):")
 clin_sig = spark.sql(f"SELECT clinical_significance, COUNT(*) as count FROM {SILVER_CLINVAR} GROUP BY clinical_significance ORDER BY count DESC LIMIT 5").collect()
 for row in clin_sig:
-    print(f"     • {row.clinical_significance}: {row['count']:,}")
+    print(f"     - {row.clinical_significance}: {row['count']:,}")
 
 print("\n   GTF Feature Types (Top 5):")
 features = spark.sql(f"SELECT feature, COUNT(*) as count FROM {SILVER_GTF} GROUP BY feature ORDER BY count DESC LIMIT 5").collect()
 for row in features:
-    print(f"     • {row.feature}: {row['count']:,}")
+    print(f"     - {row.feature}: {row['count']:,}")
 
 # Check 5: Sample data
-print("\n🔍 Check 5: Sample Data (3 records each)")
+print("\nCheck 5: Sample Data (3 records each)")
 print("-" * 70)
 
 print("\n   VCF Sample:")
@@ -377,5 +445,195 @@ print("\n   ClinVar Sample:")
 spark.sql(f"SELECT allele_id, gene_symbol, clinical_significance, chromosome FROM {SILVER_CLINVAR} LIMIT 3").show(3, truncate=False)
 
 print("\n" + "="*70)
-print("✅ SILVER LAYER VERIFICATION COMPLETE!")
+print("[SUCCESS] SILVER LAYER VERIFICATION COMPLETE!")
 print("="*70)
+
+# COMMAND ----------
+
+# DBTITLE 1,ETL Tests: Silver Layer Quality Checks
+# MAGIC %md
+# MAGIC ## ETL Tests: Silver Layer Quality Checks
+# MAGIC
+# MAGIC Validating data transformation, integrity, and quality:
+# MAGIC 1. **Record Count Validation** - Verify transformation preserved data correctly
+# MAGIC 2. **Referential Integrity** - Ensure data traceability
+# MAGIC 3. **Partition Integrity** - Verify chromosome partitioning
+# MAGIC 4. **Duplicate Detection** - No invalid duplicates
+# MAGIC 5. **Mandatory Column Null Check** - Critical columns have no NULLs
+
+# COMMAND ----------
+
+# DBTITLE 1,Test 1: Record Count Validation
+print("\n" + "="*70)
+print("SILVER TEST 1: RECORD COUNT VALIDATION")
+print("="*70)
+
+# Expected values
+EXPECTED_SILVER_VCF = 6468094
+EXPECTED_SILVER_GTF = 5868512
+EXPECTED_SILVER_CLINVAR = 4514767
+
+# Actual counts
+actual_vcf = spark.table(SILVER_VCF).count()
+actual_gtf = spark.table(SILVER_GTF).count()
+actual_clinvar = spark.table(SILVER_CLINVAR).count()
+
+print("\nRecord Counts:")
+print(f"  VCF Variants:     {actual_vcf:>10,} (Expected: {EXPECTED_SILVER_VCF:>10,})")
+print(f"  GTF Annotations:  {actual_gtf:>10,} (Expected: {EXPECTED_SILVER_GTF:>10,})")
+print(f"  ClinVar Variants: {actual_clinvar:>10,} (Expected: {EXPECTED_SILVER_CLINVAR:>10,})")
+print(f"  Total:            {(actual_vcf + actual_gtf + actual_clinvar):>10,}")
+
+# Validation (0.1% tolerance)
+tolerance = 0.001
+vcf_match = abs(actual_vcf - EXPECTED_SILVER_VCF) / EXPECTED_SILVER_VCF <= tolerance
+gtf_match = abs(actual_gtf - EXPECTED_SILVER_GTF) / EXPECTED_SILVER_GTF <= tolerance
+clinvar_match = abs(actual_clinvar - EXPECTED_SILVER_CLINVAR) / EXPECTED_SILVER_CLINVAR <= tolerance
+
+test_passed = vcf_match and gtf_match and clinvar_match
+
+print("\n" + "="*70)
+if test_passed:
+    print("[✓ PASS] Silver Test 1: All record counts match expected")
+else:
+    print("[✗ FAIL] Silver Test 1: Record count mismatch")
+print("="*70 + "\n")
+
+# COMMAND ----------
+
+# DBTITLE 1,Test 2: Referential Integrity
+print("="*70)
+print("SILVER TEST 2: REFERENTIAL INTEGRITY")
+print("="*70)
+
+# Check that Silver VCF exists for downstream Gold joins
+silver_vcf_df = spark.table(SILVER_VCF).select("chrom", "pos").distinct()
+silver_vcf_count = silver_vcf_df.count()
+
+print(f"\nSilver VCF distinct variants: {silver_vcf_count:,}")
+print("Checking mandatory columns for downstream joins...")
+
+# Check for NULLs in join keys
+null_chrom = spark.table(SILVER_VCF).filter(col("chrom").isNull()).count()
+null_pos = spark.table(SILVER_VCF).filter(col("pos").isNull()).count()
+
+print(f"  NULL chrom: {null_chrom}")
+print(f"  NULL pos: {null_pos}")
+
+test_passed = (null_chrom == 0) and (null_pos == 0) and (silver_vcf_count > 6000000)
+
+print("\n" + "="*70)
+if test_passed:
+    print("[✓ PASS] Silver Test 2: Referential integrity maintained")
+else:
+    print("[✗ FAIL] Silver Test 2: Integrity issues detected")
+print("="*70 + "\n")
+
+# COMMAND ----------
+
+# DBTITLE 1,Test 3: Partition Integrity
+print("="*70)
+print("SILVER TEST 3: PARTITION INTEGRITY")
+print("="*70)
+
+# Check chromosome 1 exists in VCF (partitioned table)
+vcf_chr1 = spark.table(SILVER_VCF).filter(col("chrom") == "1").count()
+
+print(f"\nChromosome 1 variants in Silver VCF: {vcf_chr1:,}")
+
+# Verify partition distribution
+chrom_distribution = spark.table(SILVER_VCF).groupBy("chrom").count().orderBy("chrom").collect()
+print(f"\nTotal chromosomes represented: {len(chrom_distribution)}")
+print("Sample distribution (first 5):")
+for row in chrom_distribution[:5]:
+    print(f"  Chr {row.chrom}: {row['count']:,} variants")
+
+test_passed = vcf_chr1 > 6000000
+
+print("\n" + "="*70)
+if test_passed:
+    print("[✓ PASS] Silver Test 3: Partition integrity verified")
+else:
+    print("[✗ FAIL] Silver Test 3: Partitioning issue detected")
+print("="*70 + "\n")
+
+# COMMAND ----------
+
+# DBTITLE 1,Test 4: Duplicate Detection
+print("="*70)
+print("SILVER TEST 4: DUPLICATE DETECTION")
+print("="*70)
+
+# Check VCF for true duplicates (same chrom, pos, ref, alt)
+vcf_df = spark.table(SILVER_VCF)
+total_vcf = vcf_df.count()
+distinct_vcf = vcf_df.select("chrom", "pos", "ref_allele", "alt_allele").distinct().count()
+vcf_duplicates = total_vcf - distinct_vcf
+
+print(f"\nVCF Variants:")
+print(f"  Total records: {total_vcf:,}")
+print(f"  Distinct variants: {distinct_vcf:,}")
+print(f"  Duplicates: {vcf_duplicates}")
+
+# Check ClinVar for duplicates on allele_id
+clinvar_df = spark.table(SILVER_CLINVAR)
+total_clinvar = clinvar_df.count()
+distinct_clinvar = clinvar_df.select("allele_id").distinct().count()
+clinvar_duplicates = total_clinvar - distinct_clinvar
+
+print(f"\nClinVar Variants:")
+print(f"  Total records: {total_clinvar:,}")
+print(f"  Distinct allele_ids: {distinct_clinvar:,}")
+print(f"  Duplicates: {clinvar_duplicates}")
+
+test_passed = (vcf_duplicates == 0) and (clinvar_duplicates == 0)
+
+print("\n" + "="*70)
+if test_passed:
+    print("[✓ PASS] Silver Test 4: No duplicates detected")
+else:
+    print("[✗ FAIL] Silver Test 4: Duplicates found")
+print("="*70 + "\n")
+
+# COMMAND ----------
+
+# DBTITLE 1,Test 5: Mandatory Column Null Check
+print("="*70)
+print("SILVER TEST 5: MANDATORY COLUMN NULL CHECK")
+print("="*70)
+
+# Check VCF mandatory columns
+vcf_df = spark.table(SILVER_VCF)
+vcf_nulls = {
+    "chrom": vcf_df.filter(col("chrom").isNull()).count(),
+    "pos": vcf_df.filter(col("pos").isNull()).count(),
+    "ref_allele": vcf_df.filter(col("ref_allele").isNull()).count(),
+    "alt_allele": vcf_df.filter(col("alt_allele").isNull()).count()
+}
+
+print("\nVCF Mandatory Columns:")
+for col_name, null_count in vcf_nulls.items():
+    status = "✓" if null_count == 0 else "✗"
+    print(f"  [{status}] {col_name}: {null_count} NULLs")
+
+# Check ClinVar mandatory columns
+clinvar_df = spark.table(SILVER_CLINVAR)
+clinvar_nulls = {
+    "allele_id": clinvar_df.filter(col("allele_id").isNull()).count(),
+    "chromosome": clinvar_df.filter(col("chromosome").isNull()).count()
+}
+
+print("\nClinVar Mandatory Columns:")
+for col_name, null_count in clinvar_nulls.items():
+    status = "✓" if null_count == 0 else "✗"
+    print(f"  [{status}] {col_name}: {null_count} NULLs")
+
+total_nulls = sum(vcf_nulls.values()) + sum(clinvar_nulls.values())
+test_passed = total_nulls == 0
+
+print("\n" + "="*70)
+if test_passed:
+    print("[✓ PASS] Silver Test 5: No NULLs in mandatory columns")
+else:
+    print(f"[✗ FAIL] Silver Test 5: Found {total_nulls} NULLs in mandatory columns")
+print("="*70 + "\n")

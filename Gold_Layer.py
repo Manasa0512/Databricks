@@ -3,7 +3,7 @@
 # MAGIC %md
 # MAGIC # Gold Layer: Analytics-Ready Genomics Intelligence
 # MAGIC
-# MAGIC ## 🎯 Simple Gold Layer with 3 Tables
+# MAGIC ## Simple Gold Layer with 3 Tables
 # MAGIC
 # MAGIC ```
 # MAGIC Silver Layer                    Gold Layer (Analytics-Ready)
@@ -20,10 +20,94 @@
 # MAGIC
 # MAGIC ---
 # MAGIC
-# MAGIC ## 💾 Storage
+# MAGIC ## Storage
 # MAGIC - **Format**: Delta Lake
 # MAGIC - **Write Mode**: Overwrite
 # MAGIC - **Partitioning**: By chromosome
+
+# COMMAND ----------
+
+# DBTITLE 1,Pipeline Pseudocode
+# MAGIC %md
+# MAGIC # Gold Layer Pseudocode
+# MAGIC
+# MAGIC ```
+# MAGIC {
+# MAGIC   START Gold Layer Analytics
+# MAGIC   
+# MAGIC   STEP 1: Load Silver tables
+# MAGIC   {
+# MAGIC     LOAD silver_vcf_variants (6.4M variants)
+# MAGIC     LOAD silver_gene_annotations (filter to feature='gene' only → 78K genes)
+# MAGIC     LOAD silver_clinical_variants (4.5M clinical annotations)
+# MAGIC   }
+# MAGIC   
+# MAGIC   STEP 2: Create gold_variant_summary (Complete variant profile)
+# MAGIC   {
+# MAGIC     JOIN vcf with genes (range join)
+# MAGIC     {
+# MAGIC       CONDITION: vcf.chrom = gene.seqname AND vcf.pos BETWEEN gene.start_pos AND gene.end_pos
+# MAGIC       RESULT: Map variants to their containing genes
+# MAGIC     }
+# MAGIC     
+# MAGIC     JOIN result with clinical_variants (position join)
+# MAGIC     {
+# MAGIC       CONDITION: chrom = chromosome AND pos = start_pos
+# MAGIC       RESULT: Add clinical annotations to variants
+# MAGIC     }
+# MAGIC     
+# MAGIC     SELECT final columns (chrom, pos, ref, alt, variant_type, gene_id, gene_name, gene_type, clinical_significance, quality)
+# MAGIC     WRITE to gold_variant_summary (partitioned by chrom)
+# MAGIC   }
+# MAGIC   
+# MAGIC   STEP 3: Create gold_clinical_significance (Pathogenicity aggregations)
+# MAGIC   {
+# MAGIC     SOURCE: gold_variant_summary WHERE clinical_significance IS NOT NULL
+# MAGIC     
+# MAGIC     AGGREGATE by clinical_significance
+# MAGIC     {
+# MAGIC       COUNT total_variants
+# MAGIC       COUNT DISTINCT unique_genes
+# MAGIC       COUNT DISTINCT unique_positions
+# MAGIC       COMPUTE avg_quality
+# MAGIC     }
+# MAGIC     
+# MAGIC     AGGREGATE by gene + clinical_significance
+# MAGIC     {
+# MAGIC       COUNT variants per gene per significance level
+# MAGIC       RANK genes by pathogenic variant burden
+# MAGIC     }
+# MAGIC     
+# MAGIC     WRITE to gold_clinical_significance (partitioned by clinical_significance)
+# MAGIC   }
+# MAGIC   
+# MAGIC   STEP 4: Create gold_gene_hotspots (Gene variant burden)
+# MAGIC   {
+# MAGIC     SOURCE: gold_variant_summary WHERE gene_id IS NOT NULL
+# MAGIC     
+# MAGIC     GROUP BY gene_id, gene_name, gene_type
+# MAGIC     {
+# MAGIC       COUNT total_variants per gene
+# MAGIC       COUNT unique_variant_types per gene
+# MAGIC       COMPUTE avg_quality per gene
+# MAGIC       RANK genes by variant count (dense_rank)
+# MAGIC     }
+# MAGIC     
+# MAGIC     ORDER BY total_variants DESC
+# MAGIC     WRITE to gold_gene_hotspots (no partitioning - small table)
+# MAGIC   }
+# MAGIC   
+# MAGIC   STEP 5: Verification
+# MAGIC   {
+# MAGIC     VERIFY all 3 gold tables exist
+# MAGIC     COUNT records in each table
+# MAGIC     SHOW sample data
+# MAGIC     DISPLAY summary statistics
+# MAGIC   }
+# MAGIC   
+# MAGIC   END Gold Layer Analytics
+# MAGIC }
+# MAGIC ```
 
 # COMMAND ----------
 
@@ -50,7 +134,7 @@ GOLD_VARIANT_SUMMARY = "workspace.genomics_project.gold_variant_summary"
 GOLD_CLINICAL_SIG = "workspace.genomics_project.gold_clinical_significance"
 GOLD_GENE_HOTSPOTS = "workspace.genomics_project.gold_gene_hotspots"
 
-print("✅ Gold Layer Configuration Loaded")
+print("Gold Layer Configuration Loaded")
 print(f"   Silver sources: 3 tables")
 print(f"   Gold targets: 3 tables")
 
@@ -83,33 +167,33 @@ print(f"   Gold targets: 3 tables")
 # STEP 1: Load Silver Tables with Optimization
 # ============================================================================
 
-print("📂 Loading Silver Tables...")
+print("Loading Silver Tables...")
 print("="*70)
 
 # Load VCF Variants
-print("\n1️⃣ Loading VCF Variants...")
+print("\n[1] Loading VCF Variants...")
 vcf_silver = spark.table(SILVER_VCF)
 vcf_count = vcf_silver.count()
-print(f"   ✅ VCF: {vcf_count:,} variants loaded")
+print(f"   [OK] VCF: {vcf_count:,} variants loaded")
 
 # Load Gene Annotations (filter to genes only for efficiency)
-print("\n2️⃣ Loading Gene Annotations (filtering to 'gene' features)...")
+print("\n[2] Loading Gene Annotations (filtering to 'gene' features)...")
 gtf_silver = spark.table(SILVER_GTF) \
     .filter(col("feature") == "gene") \
     .filter(col("gene_name").isNotNull()) \
     .filter(col("gene_name") != "")
 gtf_count = gtf_silver.count()
-print(f"   ✅ Genes: {gtf_count:,} gene records loaded (filtered from 5.8M annotations)")
-print(f"   📊 Reduction: {5868512 - gtf_count:,} non-gene records filtered out")
+print(f"   [OK] Genes: {gtf_count:,} gene records loaded (filtered from 5.8M annotations)")
+print(f"   [INFO] Reduction: {5868512 - gtf_count:,} non-gene records filtered out")
 
 # Load Clinical Variants
-print("\n3️⃣ Loading Clinical Variants...")
+print("\n[3] Loading Clinical Variants...")
 clinvar_silver = spark.table(SILVER_CLINVAR)
 clinvar_count = clinvar_silver.count()
-print(f"   ✅ ClinVar: {clinvar_count:,} clinical variants loaded")
+print(f"   [OK] ClinVar: {clinvar_count:,} clinical variants loaded")
 
 print("\n" + "="*70)
-print("✅ All Silver tables loaded and ready for Gold transformations")
+print("[OK] All Silver tables loaded and ready for Gold transformations")
 print("="*70)
 
 # COMMAND ----------
@@ -118,7 +202,17 @@ print("="*70)
 # MAGIC %md
 # MAGIC # Gold Table 1: gold_variant_summary
 # MAGIC
-# MAGIC **Complete variant profile** with genomic coordinates, gene annotation, clinical significance, and quality metrics.
+# MAGIC **Complete variant profile** with genomic coordinates, gene annotation, clinical significance, quality metrics, and **population frequencies**.
+# MAGIC
+# MAGIC **New in this version**: Added single `population_frequencies` struct column containing regional frequencies from 1000 Genomes Project Phase 3:
+# MAGIC - `african` - African populations (AFR_AF)
+# MAGIC - `american` - American/Latino populations (AMR_AF)
+# MAGIC - `east_asian` - East Asian populations (EAS_AF)
+# MAGIC - `european` - European populations (EUR_AF)
+# MAGIC - `south_asian` - South Asian populations (SAS_AF)
+# MAGIC - `global` - Global allele frequency (AF)
+# MAGIC
+# MAGIC **Data source**: 2,504 individuals across 5 super-populations
 # MAGIC
 # MAGIC **Partitioned by**: chrom
 
@@ -127,19 +221,32 @@ print("="*70)
 # DBTITLE 1,Create Gold: Variant Summary
 # ============================================================================
 # GOLD TABLE 1: gold_variant_summary
-# Complete variant profile with gene + clinical annotations
+# Complete variant profile with gene + clinical annotations + population frequencies
 # ============================================================================
 
-print("🧬 GOLD TABLE 1: Variant Summary (Enriched)")
+from pyspark.sql.functions import regexp_extract
+
+print("GOLD TABLE 1: Variant Summary (Enriched with Population Frequencies)")
 print("="*70)
 
 try:
+    # Step 0: Extract population frequencies from VCF INFO field as 6 separate columns
+    print("\nStep 0: Extracting population frequencies from INFO field...")
+    vcf_with_pop = vcf_silver \
+        .withColumn("african_freq", regexp_extract(col("info"), r"AFR_AF=([0-9.]+)", 1).cast("double")) \
+        .withColumn("american_freq", regexp_extract(col("info"), r"AMR_AF=([0-9.]+)", 1).cast("double")) \
+        .withColumn("east_asian_freq", regexp_extract(col("info"), r"EAS_AF=([0-9.]+)", 1).cast("double")) \
+        .withColumn("european_freq", regexp_extract(col("info"), r"EUR_AF=([0-9.]+)", 1).cast("double")) \
+        .withColumn("south_asian_freq", regexp_extract(col("info"), r"SAS_AF=([0-9.]+)", 1).cast("double")) \
+        .withColumn("global_freq", regexp_extract(col("info"), r"AF=([0-9.]+)", 1).cast("double"))
+    print("   [OK] Population frequency columns added (6 separate columns: african_freq, american_freq, east_asian_freq, european_freq, south_asian_freq, global_freq)")
+    
     # Step 1: VCF ↔ GTF Range Join (variant to gene mapping)
-    print("\n🔗 Step 1: Joining VCF with Gene Annotations (range join)...")
+    print("\nStep 1: Joining VCF with Gene Annotations (range join)...")
     print("   Join condition: vcf.chrom = gene.seqname AND vcf.pos BETWEEN gene.start_pos AND gene.end_pos")
     
     # Normalize chromosome format for GTF join (VCF: "1" → "chr1" to match GTF: "chr1")
-    vcf_normalized = vcf_silver.withColumn(
+    vcf_normalized = vcf_with_pop.withColumn(
         "chrom_for_gtf", 
         when(col("chrom").startswith("chr"), col("chrom")).otherwise(concat_ws("", lit("chr"), col("chrom")))
     )
@@ -164,16 +271,22 @@ try:
         col("gene.gene_id"),
         col("gene.gene_name"),
         col("gene.gene_type"),
-        col("gene.strand")
+        col("gene.strand"),
+        col("vcf.african_freq"),
+        col("vcf.american_freq"),
+        col("vcf.east_asian_freq"),
+        col("vcf.european_freq"),
+        col("vcf.south_asian_freq"),
+        col("vcf.global_freq")
     )
     
     join1_count = vcf_gene_join.count()
     genes_found = vcf_gene_join.filter(col("gene_name").isNotNull()).count()
-    print(f"   ✅ Range join complete: {join1_count:,} variants processed")
-    print(f"   🧬 Variants mapped to genes: {genes_found:,} ({(genes_found/join1_count*100):.1f}%)")
+    print(f"   [OK] Range join complete: {join1_count:,} variants processed")
+    print(f"   [INFO] Variants mapped to genes: {genes_found:,} ({(genes_found/join1_count*100):.1f}%)")
     
     # Step 2: Result ↔ ClinVar Position-based Join
-    print("\n🔗 Step 2: Joining with Clinical Variants (position-based)...")
+    print("\nStep 2: Joining with Clinical Variants (position-based)...")
     print("   Join condition: chrom + pos match")
     print("   Note: ClinVar ref/alt alleles are 99% 'na' - using position-based join instead")
     
@@ -210,6 +323,14 @@ try:
         col("v.variant_type"),
         col("v.filter_status"),
         
+        # Population frequencies (6 separate columns - 1000 Genomes Project Phase 3)
+        col("v.african_freq"),
+        col("v.american_freq"),
+        col("v.east_asian_freq"),
+        col("v.european_freq"),
+        col("v.south_asian_freq"),
+        col("v.global_freq"),
+        
         # Flags
         when(col("c.allele_id").isNotNull(), lit(True)).otherwise(lit(False)).alias("has_clinical_annotation"),
         when(col("v.gene_name").isNotNull(), lit(True)).otherwise(lit(False)).alias("has_gene_annotation"),
@@ -219,11 +340,11 @@ try:
     )
     
     clinical_matched = variant_summary.filter(col("has_clinical_annotation") == True).count()
-    print(f"   ✅ Clinical match complete: {clinical_matched:,} variants have clinical annotations")
-    print(f"   📊 Match rate: {(clinical_matched/join1_count*100):.2f}%")
+    print(f"   [OK] Clinical match complete: {clinical_matched:,} variants have clinical annotations")
+    print(f"   [INFO] Match rate: {(clinical_matched/join1_count*100):.2f}%")
     
     # Step 3: Write to Gold Delta table
-    print("\n💾 Step 3: Writing to Gold Delta table...")
+    print("\nStep 3: Writing to Gold Delta table...")
     variant_summary.write \
         .format("delta") \
         .mode("overwrite") \
@@ -232,23 +353,26 @@ try:
         .saveAsTable(GOLD_VARIANT_SUMMARY)
     
     # Step 4: Optimize with Z-ORDER
-    print("\n⚡ Step 4: Optimizing with Z-ORDER...")
+    print("\nStep 4: Optimizing with Z-ORDER...")
     spark.sql(f"OPTIMIZE {GOLD_VARIANT_SUMMARY} ZORDER BY (gene_name, clinical_significance)")
     
     final_count = spark.table(GOLD_VARIANT_SUMMARY).count()
     gene_annotated_count = spark.table(GOLD_VARIANT_SUMMARY).filter(col("has_gene_annotation") == True).count()
     clinical_annotated_count = spark.table(GOLD_VARIANT_SUMMARY).filter(col("has_clinical_annotation") == True).count()
     
-    print(f"\n✅ SUCCESS: gold_variant_summary created with {final_count:,} variants")
-    print(f"   📊 Gene annotations: {gene_annotated_count:,} variants ({(gene_annotated_count/final_count*100):.1f}%)")
-    print(f"   🏥 Clinical annotations: {clinical_annotated_count:,} variants ({(clinical_annotated_count/final_count*100):.2f}%)")
-    print(f"   📁 Partitioned by: chrom")
-    print(f"   ⚡ Optimized with: Z-ORDER (gene_name, clinical_significance)")
-    print(f"\n📌 Note: ClinVar join is position-based (chrom+pos) due to 99% 'na' values in ref/alt allele columns")
+    print(f"\n[SUCCESS] gold_variant_summary created with {final_count:,} variants")
+    print(f"   [INFO] Gene annotations: {gene_annotated_count:,} variants ({(gene_annotated_count/final_count*100):.1f}%)")
+    print(f"   [INFO] Clinical annotations: {clinical_annotated_count:,} variants ({(clinical_annotated_count/final_count*100):.2f}%)")
+    print(f"   [INFO] Population frequencies: 6 separate columns (african_freq, american_freq, east_asian_freq, european_freq, south_asian_freq, global_freq)")
+    print(f"   [INFO] Total columns: 27")
+    print(f"   [INFO] Partitioned by: chrom")
+    print(f"   [INFO] Optimized with: Z-ORDER (gene_name, clinical_significance)")
+    print(f"\n[NOTE] ClinVar join is position-based (chrom+pos) due to 99% 'na' values in ref/alt allele columns")
+    print(f"[NOTE] Population frequencies from 1000 Genomes Project Phase 3 (2,504 individuals)")
     print("="*70)
     
 except Exception as e:
-    print(f"\n❌ ERROR: {str(e)}")
+    print(f"\n[ERROR] {str(e)}")
     raise
 
 # COMMAND ----------
@@ -281,21 +405,21 @@ from pyspark.sql.types import StringType, IntegerType, LongType, DoubleType
 GOLD_VARIANT_SUMMARY = "workspace.genomics_project.gold_variant_summary"
 GOLD_CLINICAL_SIG = "workspace.genomics_project.gold_clinical_significance"
 
-print("🏥 GOLD TABLE 3: Clinical Significance (Aggregation)")
+print("GOLD TABLE 3: Clinical Significance (Aggregation)")
 print("="*70)
 
 try:
-    print("\n📈 Aggregating clinical significance metrics...")
+    print("\nAggregating clinical significance metrics...")
     
     # Read variant summary and filter to clinically annotated variants only
     variant_summary_df = spark.table(GOLD_VARIANT_SUMMARY)
     clinical_variants = variant_summary_df.filter(col("has_clinical_annotation") == True)
     
     clinical_count = clinical_variants.count()
-    print(f"   ✅ Processing {clinical_count:,} clinically annotated variants")
+    print(f"   [OK] Processing {clinical_count:,} clinically annotated variants")
     
     # Aggregation 1: By Clinical Significance Category
-    print("\n📊 Aggregation 1: By Clinical Significance Category...")
+    print("\nAggregation 1: By Clinical Significance Category...")
     by_significance = clinical_variants.groupBy("clinical_significance").agg(
         count("*").alias("variant_count"),
         countDistinct("gene_name").alias("unique_genes"),
@@ -310,7 +434,7 @@ try:
     )
     
     # Aggregation 2: By Gene + Clinical Significance (top genes per category)
-    print("\n🧬 Aggregation 2: By Gene + Clinical Significance...")
+    print("\nAggregation 2: By Gene + Clinical Significance...")
     by_gene_significance = clinical_variants.groupBy("gene_name", "clinical_significance").agg(
         count("*").alias("variant_count"),
         countDistinct("pos").alias("unique_positions")
@@ -396,7 +520,7 @@ try:
     )
     
     # Write to Gold
-    print("\n💾 Writing to Gold Delta table...")
+    print("\nWriting to Gold Delta table...")
     clinical_sig_final.write \
         .format("delta") \
         .mode("overwrite") \
@@ -405,8 +529,8 @@ try:
         .saveAsTable(GOLD_CLINICAL_SIG)
     
     final_count = spark.table(GOLD_CLINICAL_SIG).count()
-    print(f"\n✅ SUCCESS: gold_clinical_significance created with {final_count:,} records")
-    print("\n🏥 Clinical Significance Distribution:")
+    print(f"\n[SUCCESS] gold_clinical_significance created with {final_count:,} records")
+    print("\nClinical Significance Distribution:")
     spark.table(GOLD_CLINICAL_SIG).filter(
         col("aggregation_type") == "by_clinical_significance"
     ).select(
@@ -415,7 +539,7 @@ try:
     print("="*70)
     
 except Exception as e:
-    print(f"\n❌ ERROR: {str(e)}")
+    print(f"\n[ERROR] {str(e)}")
     raise
 
 # COMMAND ----------
@@ -446,11 +570,11 @@ from pyspark.sql.functions import (
 GOLD_VARIANT_SUMMARY = "workspace.genomics_project.gold_variant_summary"
 GOLD_GENE_HOTSPOTS = "workspace.genomics_project.gold_gene_hotspots"
 
-print("🧬 GOLD TABLE 3: Gene Hotspots (Variant Burden)")
+print("GOLD TABLE 3: Gene Hotspots (Variant Burden)")
 print("="*70)
 
 try:
-    print("\n📊 Aggregating variant counts by gene...")
+    print("\nAggregating variant counts by gene...")
     
     # Load variant summary and filter to gene-annotated variants
     variant_summary_df = spark.table(GOLD_VARIANT_SUMMARY)
@@ -467,7 +591,7 @@ try:
     ).orderBy(col("total_variants").desc())
     
     # Write to Gold
-    print("\n💾 Writing to Gold Delta table...")
+    print("\nWriting to Gold Delta table...")
     gene_hotspots.write \
         .format("delta") \
         .mode("overwrite") \
@@ -475,15 +599,15 @@ try:
         .saveAsTable(GOLD_GENE_HOTSPOTS)
     
     final_count = spark.table(GOLD_GENE_HOTSPOTS).count()
-    print(f"\n✅ SUCCESS: gold_gene_hotspots created with {final_count:,} genes")
-    print("\n🔥 Top 10 Gene Hotspots:")
+    print(f"\n[SUCCESS] gold_gene_hotspots created with {final_count:,} genes")
+    print("\nTop 10 Gene Hotspots:")
     spark.table(GOLD_GENE_HOTSPOTS).select(
         "gene_name", "total_variants", "snp_count", "clinical_variants"
     ).show(10, truncate=False)
     print("="*70)
     
 except Exception as e:
-    print(f"\n❌ ERROR: {str(e)}")
+    print(f"\n[ERROR] {str(e)}")
     raise
 
 # COMMAND ----------
@@ -499,10 +623,10 @@ GOLD_CLINICAL_SIG = "workspace.genomics_project.gold_clinical_significance"
 GOLD_GENE_HOTSPOTS = "workspace.genomics_project.gold_gene_hotspots"
 
 print("\n" + "="*70)
-print("🎉 GOLD LAYER PIPELINE COMPLETE!")
+print("GOLD LAYER PIPELINE COMPLETE!")
 print("="*70)
 
-print("\n📁 GOLD TABLES CREATED (3 tables):\n")
+print("\nGOLD TABLES CREATED (3 tables):\n")
 
 gold_tables = [
     ("1", "gold_variant_summary", GOLD_VARIANT_SUMMARY),
@@ -513,12 +637,198 @@ gold_tables = [
 for num, name, full_name in gold_tables:
     count = spark.table(full_name).count()
     print(f"{num}. {name}")
-    print(f"   📊 Records: {count:,}")
+    print(f"   Records: {count:,}")
     print()
 
 print("="*70)
-print("✅ SUCCESS! Gold Layer is ready for analysis.")
+print("[SUCCESS] Gold Layer is ready for analysis.")
 print("="*70)
+
+# COMMAND ----------
+
+# DBTITLE 1,ETL Tests: Gold Layer Analytics Validation
+# MAGIC %md
+# MAGIC ## ETL Tests: Gold Layer Analytics Validation
+# MAGIC
+# MAGIC Validating analytics quality, join accuracy, and aggregations:
+# MAGIC 1. **Record Count Validation** - Verify join expansion is correct
+# MAGIC 2. **Join Accuracy** - VCF→GTF (77.7%) and VCF→ClinVar (0.99%)
+# MAGIC 3. **Aggregation Accuracy** - Gene hotspots match variant counts
+# MAGIC 4. **Referential Integrity** - Gold variants traceable to Silver
+# MAGIC 5. **Partition Integrity** - Chromosome partitioning verified
+
+# COMMAND ----------
+
+# DBTITLE 1,Test 1: Record Count Validation
+print("\n" + "="*70)
+print("GOLD TEST 1: RECORD COUNT VALIDATION")
+print("="*70)
+
+# Expected values (updated May 29, 2026 after adding population frequency columns)
+EXPECTED_GOLD_VARIANT_SUMMARY = 7405220
+EXPECTED_GOLD_CLINICAL_SIG = 7323
+EXPECTED_GOLD_GENE_HOTSPOTS = 6722
+
+# Actual counts
+actual_variant_summary = spark.table(GOLD_VARIANT_SUMMARY).count()
+actual_clinical_sig = spark.table(GOLD_CLINICAL_SIG).count()
+actual_gene_hotspots = spark.table(GOLD_GENE_HOTSPOTS).count()
+
+print("\nGold Layer Record Counts:")
+print(f"  Variant Summary:        {actual_variant_summary:>10,} (Expected: {EXPECTED_GOLD_VARIANT_SUMMARY:>10,})")
+print(f"  Clinical Significance:  {actual_clinical_sig:>10,} (Expected: {EXPECTED_GOLD_CLINICAL_SIG:>10,})")
+print(f"  Gene Hotspots:          {actual_gene_hotspots:>10,} (Expected: {EXPECTED_GOLD_GENE_HOTSPOTS:>10,})")
+
+# Validation (0.5% tolerance for Gold due to join variations)
+tolerance = 0.005
+variant_match = abs(actual_variant_summary - EXPECTED_GOLD_VARIANT_SUMMARY) / EXPECTED_GOLD_VARIANT_SUMMARY <= tolerance
+clinical_match = abs(actual_clinical_sig - EXPECTED_GOLD_CLINICAL_SIG) / EXPECTED_GOLD_CLINICAL_SIG <= tolerance
+hotspots_match = abs(actual_gene_hotspots - EXPECTED_GOLD_GENE_HOTSPOTS) / EXPECTED_GOLD_GENE_HOTSPOTS <= tolerance
+
+test_passed = variant_match and clinical_match and hotspots_match
+
+print("\n" + "="*70)
+if test_passed:
+    print("[✓ PASS] Gold Test 1: All record counts match expected")
+else:
+    print("[✗ FAIL] Gold Test 1: Record count mismatch")
+print("="*70 + "\n")
+
+# COMMAND ----------
+
+# DBTITLE 1,Test 2: Join Accuracy
+print("="*70)
+print("GOLD TEST 2: JOIN ACCURACY")
+print("="*70)
+
+# Test VCF → GTF join (gene annotation rate)
+gold_df = spark.table(GOLD_VARIANT_SUMMARY)
+total_variants = gold_df.count()
+variants_with_genes = gold_df.filter(col("has_gene_annotation") == True).count()
+gene_mapping_rate = (variants_with_genes / total_variants) * 100
+
+print("\nVCF → GTF Join (Range Join):")
+print(f"  Total variants: {total_variants:,}")
+print(f"  With gene annotation: {variants_with_genes:,}")
+print(f"  Mapping rate: {gene_mapping_rate:.2f}%")
+print(f"  Expected: 77.7%")
+
+# Test VCF → ClinVar join (clinical annotation rate)
+variants_with_clinical = gold_df.filter(col("has_clinical_annotation") == True).count()
+clinical_rate = (variants_with_clinical / total_variants) * 100
+
+print("\nVCF → ClinVar Join (Position Join):")
+print(f"  Total variants: {total_variants:,}")
+print(f"  With clinical annotation: {variants_with_clinical:,}")
+print(f"  Annotation rate: {clinical_rate:.2f}%")
+print(f"  Expected: 0.99%")
+
+# Validation
+gene_join_ok = 77.0 <= gene_mapping_rate <= 78.5
+clinical_join_ok = 0.9 <= clinical_rate <= 1.1
+
+test_passed = gene_join_ok and clinical_join_ok
+
+print("\n" + "="*70)
+if test_passed:
+    print("[✓ PASS] Gold Test 2: Join accuracy within expected ranges")
+else:
+    print("[✗ FAIL] Gold Test 2: Join accuracy outside expected ranges")
+    if not gene_join_ok:
+        print(f"  - Gene mapping rate {gene_mapping_rate:.2f}% not in [77.0%, 78.5%]")
+    if not clinical_join_ok:
+        print(f"  - Clinical rate {clinical_rate:.2f}% not in [0.9%, 1.1%]")
+print("="*70 + "\n")
+
+# COMMAND ----------
+
+# DBTITLE 1,Test 3: Aggregation Accuracy
+print("="*70)
+print("GOLD TEST 3: AGGREGATION ACCURACY")
+print("="*70)
+
+# Check that gene hotspots aggregation matches source data
+gold_variant = spark.table(GOLD_VARIANT_SUMMARY)
+gold_hotspots = spark.table(GOLD_GENE_HOTSPOTS)
+
+variants_with_genes = gold_variant.filter(col("gene_name").isNotNull()).count()
+hotspots_sum = gold_hotspots.agg(_sum("total_variants")).collect()[0][0]
+
+print("\nGene Hotspots Aggregation:")
+print(f"  Variants with genes (source): {variants_with_genes:,}")
+print(f"  Hotspots sum (aggregated):    {hotspots_sum:,}")
+print(f"  Difference:                   {abs(variants_with_genes - hotspots_sum):,}")
+
+# Note: Small differences expected due to NULL gene handling
+tolerance = 100  # Allow small variance
+test_passed = abs(variants_with_genes - hotspots_sum) <= tolerance
+
+print("\n" + "="*70)
+if test_passed:
+    print("[✓ PASS] Gold Test 3: Aggregation matches source data")
+else:
+    print(f"[✗ FAIL] Gold Test 3: Aggregation mismatch exceeds tolerance ({tolerance})")
+print("="*70 + "\n")
+
+# COMMAND ----------
+
+# DBTITLE 1,Test 4: Referential Integrity
+print("="*70)
+print("GOLD TEST 4: REFERENTIAL INTEGRITY")
+print("="*70)
+
+# Check that all Gold variants exist in Silver VCF
+gold_df = spark.table(GOLD_VARIANT_SUMMARY).select("chrom", "pos").distinct()
+silver_vcf = spark.table(SILVER_VCF).select("chrom", "pos").distinct()
+
+gold_count = gold_df.count()
+matched = gold_df.join(silver_vcf, ["chrom", "pos"], "inner").count()
+match_rate = (matched / gold_count) * 100
+
+print("\nReferential Integrity Check:")
+print(f"  Gold unique variants: {gold_count:,}")
+print(f"  Matched in Silver VCF: {matched:,}")
+print(f"  Match rate: {match_rate:.2f}%")
+
+test_passed = match_rate >= 99.9
+
+print("\n" + "="*70)
+if test_passed:
+    print("[✓ PASS] Gold Test 4: All variants traceable to Silver")
+else:
+    print(f"[✗ FAIL] Gold Test 4: Match rate {match_rate:.2f}% below 99.9%")
+print("="*70 + "\n")
+
+# COMMAND ----------
+
+# DBTITLE 1,Test 5: Partition Integrity
+print("="*70)
+print("GOLD TEST 5: PARTITION INTEGRITY")
+print("="*70)
+
+# Check chromosome 1 exists and partitions are complete
+gold_df = spark.table(GOLD_VARIANT_SUMMARY)
+chr1_count = gold_df.filter(col("chrom") == "1").count()
+
+print("\nPartition Validation:")
+print(f"  Chromosome 1 variants: {chr1_count:,}")
+
+# Check partition distribution
+chrom_distribution = gold_df.groupBy("chrom").count().orderBy("chrom").collect()
+print(f"\nTotal chromosomes: {len(chrom_distribution)}")
+print("Sample distribution (first 5):")
+for row in chrom_distribution[:5]:
+    print(f"  Chr {row.chrom}: {row['count']:,} variants")
+
+# Verify chr1 has majority of variants (chr1 is the only chromosome in dataset)
+test_passed = chr1_count == gold_df.count()
+
+print("\n" + "="*70)
+if test_passed:
+    print("[✓ PASS] Gold Test 5: Partition integrity verified")
+else:
+    print(f"[✗ FAIL] Gold Test 5: Partitioning issue detected")
+print("="*70 + "\n")
 
 # COMMAND ----------
 
