@@ -222,3 +222,122 @@ flowchart TD
 4. `dim_variant`, `dim_gene`, and `dim_clinvar_annotation` are generated from Silver tables.
 5. `fact_variant_annotation` joins all dimensions into a single analytics row.
 6. Aggregate tables `gold_clinical_significance` and `gold_gene_hotspots` are computed from the fact table.
+
+---
+
+## Compact Pipeline Diagram
+
+```mermaid
+flowchart LR
+  Bronze((Bronze)) -->|ingest| Silver((Silver))
+  Silver -->|transform & enrich| Gold((Gold))
+
+  subgraph BronzeSrc [Bronze sources]
+    b_vcf[VCF raw]
+    b_gtf[GTF raw]
+    b_clin[ClinVar raw]
+  end
+
+  subgraph SilverOps [Silver tables]
+    s_vcf[silver_vcf_variants]
+    s_gtf[silver_gene_annotations]
+    s_clin[silver_clinical_variants]
+  end
+
+  subgraph GoldOps [Gold tables]
+    dim[Dimensions]
+    fact[fact_variant_annotation]
+    agg[Regional Aggregates]
+  end
+
+  b_vcf --> s_vcf
+  b_gtf --> s_gtf
+  b_clin --> s_clin
+  s_vcf --> dim
+  s_gtf --> dim
+  s_clin --> dim
+  dim --> fact
+  fact --> agg
+```
+
+---
+
+## Schema ER Diagram (compact)
+
+```mermaid
+erDiagram
+  DIM_VARIANT ||--o{ FACT_VARIANT : "variant_key -> variant_key"
+  DIM_GENE ||--o{ FACT_VARIANT : "gene_key -> gene_key"
+  DIM_CLINVAR ||--o{ FACT_VARIANT : "clinvar_key -> clinvar_key"
+  DIM_REGION ||--o{ FACT_VARIANT : "region_key -> region_key"
+
+  DIM_VARIANT {
+    string variant_key PK
+    string chrom
+    int pos
+    string variant_id
+    string ref_allele
+    string alt_allele
+    string variant_type
+    double quality_score
+  }
+
+  DIM_GENE {
+    string gene_key PK
+    string gene_id
+    string gene_name
+    string seqname
+    int start_pos
+    int end_pos
+  }
+
+  DIM_CLINVAR {
+    string clinvar_key PK
+    int allele_id
+    int variation_id
+    string chromosome
+    long start_pos
+    string clinical_significance
+  }
+
+  DIM_REGION {
+    string region_key PK
+    string region_name
+    string region_code
+  }
+
+  FACT_VARIANT {
+    string fact_variant_key PK
+    string variant_key FK
+    string gene_key FK
+    string clinvar_key FK
+    string region_key FK
+    string chrom
+    int pos
+    string clinical_significance
+    boolean has_gene_annotation
+    boolean has_clinical_annotation
+    int num_clinvar_evidence
+    double avg_quality_score
+    timestamp processed_timestamp
+  }
+
+  GOLD_CLINICAL_BY_REGION {
+    string region_key FK
+    string region_name
+    string clinical_significance
+    long total_variants
+    long unique_genes
+    double avg_quality_score
+  }
+
+  GOLD_HOTSPOTS_BY_REGION {
+    string region_key FK
+    string region_name
+    string gene_key FK
+    string gene_name
+    long total_variants
+    long clinical_variants
+    double avg_quality_score
+  }
+```
