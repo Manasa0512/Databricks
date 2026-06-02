@@ -15,62 +15,73 @@ This document now reflects the latest Databricks pipeline design and presents:
 ```mermaid
 %%{init: {"theme":"dark"}}%%
 flowchart TD
-    subgraph Bronze[Bronze Layer]
-      B1[VCF Raw Text]
-      B2[GTF Raw Text]
-      B3[ClinVar Raw CSV]
-      B1 -->|ingest + audit metadata| BRONZE_VCF[bronze_vcf_variants_raw]
-      B2 -->|ingest + audit metadata| BRONZE_GTF[bronze_gene_annotations_raw]
-      B3 -->|ingest + audit metadata| BRONZE_CLINVAR[bronze_clinical_variants_raw]
-    end
+  classDef bronzeSection fill:#1e293b,stroke:#38bdf8,color:#f8fafc,stroke-width:2px;
+  classDef silverSection fill:#0f172a,stroke:#60a5fa,color:#f8fafc,stroke-width:2px;
+  classDef goldSection fill:#03141f,stroke:#34d399,color:#f8fafc,stroke-width:2px;
+  classDef bronzeNode fill:#0f172a,stroke:#38bdf8,color:#f8fafc,stroke-width:1px;
+  classDef silverNode fill:#111827,stroke:#60a5fa,color:#f8fafc,stroke-width:1px;
+  classDef goldNode fill:#022c22,stroke:#22c55e,color:#f8fafc,stroke-width:1px;
 
-    subgraph Silver[Silver Layer]
-      S1[Parse VCF into structured columns]
-      S2[Parse GTF into structured annotations]
-      S3[Sanitize ClinVar + type cast]
-      S1 --> SILVER_VCF[silver_vcf_variants]
-      S2 --> SILVER_GTF[silver_gene_annotations]
-      S3 --> SILVER_CLINVAR[silver_clinical_variants]
-    end
+  BronzeLabel([Bronze Layer]):::bronzeSection
+  SilverLabel([Silver Layer]):::silverSection
+  GoldLabel([Gold Layer]):::goldSection
 
-    subgraph Gold[Gold Layer]
-      D1[Create dimension tables]
-      F1[Build fact table]
-      A1[Generate analytics aggregates]
-      D1 --> DIM_VARIANT[dim_variant]
-      D1 --> DIM_GENE[dim_gene]
-      D1 --> DIM_CLINVAR[dim_clinvar_annotation]
-      S1 --> D1
-      S2 --> D1
-      S3 --> D1
+  B1([VCF Raw Text]):::bronzeNode
+  B2([GTF Raw Text]):::bronzeNode
+  B3([ClinVar Raw CSV]):::bronzeNode
+  BRONZE_VCF([bronze_vcf_variants_raw]):::bronzeNode
+  BRONZE_GTF([bronze_gene_annotations_raw]):::bronzeNode
+  BRONZE_CLINVAR([bronze_clinical_variants_raw]):::bronzeNode
 
-      DIM_VARIANT --> FACT_VARIANT[fact_variant_annotation]
-      DIM_GENE --> FACT_VARIANT
-      DIM_CLINVAR --> FACT_VARIANT
-      FACT_VARIANT --> A1
-      A1 --> GOLD_CLINICAL[gold_clinical_significance]
-      A1 --> GOLD_HOTSPOTS[gold_gene_hotspots]
-    end
+  S1([Parse VCF into structured columns]):::silverNode
+  S2([Parse GTF into structured annotations]):::silverNode
+  S3([Sanitize ClinVar + type cast]):::silverNode
+  SILVER_VCF([silver_vcf_variants]):::silverNode
+  SILVER_GTF([silver_gene_annotations]):::silverNode
+  SILVER_CLINVAR([silver_clinical_variants]):::silverNode
 
-    BRONZE_VCF --> S1
-    BRONZE_GTF --> S2
-    BRONZE_CLINVAR --> S3
+  D1([Create dimension tables]):::goldNode
+  DIM_VARIANT([dim_variant]):::goldNode
+  DIM_GENE([dim_gene]):::goldNode
+  DIM_CLINVAR([dim_clinvar_annotation]):::goldNode
+  FACT_VARIANT([fact_variant_annotation]):::goldNode
+  GOLD_CLINICAL([gold_clinical_significance]):::goldNode
+  GOLD_HOTSPOTS([gold_gene_hotspots]):::goldNode
 
-    style Bronze fill:#f8fafc,stroke:#94a3b8
-    style Silver fill:#eff6ff,stroke:#2563eb
-    style Gold fill:#ecfdf5,stroke:#15803d
-    style BRONZE_VCF fill:#ffffff,stroke:#475569
-    style BRONZE_GTF fill:#ffffff,stroke:#475569
-    style BRONZE_CLINVAR fill:#ffffff,stroke:#475569
-    style SILVER_VCF fill:#ffffff,stroke:#2563eb
-    style SILVER_GTF fill:#ffffff,stroke:#2563eb
-    style SILVER_CLINVAR fill:#ffffff,stroke:#2563eb
-    style DIM_VARIANT fill:#f0fdf4,stroke:#15803d
-    style DIM_GENE fill:#f0fdf4,stroke:#15803d
-    style DIM_CLINVAR fill:#f0fdf4,stroke:#15803d
-    style FACT_VARIANT fill:#ffffff,stroke:#15803d
-    style GOLD_CLINICAL fill:#ffffff,stroke:#15803d
-    style GOLD_HOTSPOTS fill:#ffffff,stroke:#15803d
+  BronzeLabel --> B1
+  BronzeLabel --> B2
+  BronzeLabel --> B3
+  B1 -->|ingest + audit metadata| BRONZE_VCF
+  B2 -->|ingest + audit metadata| BRONZE_GTF
+  B3 -->|ingest + audit metadata| BRONZE_CLINVAR
+
+  BRONZE_VCF -->|parse| S1
+  BRONZE_GTF -->|parse| S2
+  BRONZE_CLINVAR -->|parse| S3
+
+  SilverLabel --> S1
+  SilverLabel --> S2
+  SilverLabel --> S3
+  S1 --> SILVER_VCF
+  S2 --> SILVER_GTF
+  S3 --> SILVER_CLINVAR
+
+  SILVER_VCF -->|range join\nchrom = seqname AND pos BETWEEN start_pos AND end_pos| SILVER_GTF
+  SILVER_VCF -->|position join\nchrom = chromosome AND pos = start_pos| SILVER_CLIN
+
+  SILVER_VCF -->|build| D1
+  SILVER_GTF -->|build| D1
+  SILVER_CLIN -->|build| D1
+  D1 --> DIM_VARIANT
+  D1 --> DIM_GENE
+  D1 --> DIM_CLINVAR
+
+  GoldLabel --> FACT_VARIANT
+  DIM_VARIANT -->|FK join| FACT_VARIANT
+  DIM_GENE -->|FK join| FACT_VARIANT
+  DIM_CLINVAR -->|FK join| FACT_VARIANT
+  FACT_VARIANT --> GOLD_CLINICAL
+  FACT_VARIANT --> GOLD_HOTSPOTS
 ```
 
 ## Pipeline Flow Summary
