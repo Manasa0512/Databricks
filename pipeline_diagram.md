@@ -129,6 +129,15 @@ flowchart TD
 | phenotype_list | string | Associated phenotypes |
 | pathogenicity_group | string | Normalized clinical class |
 
+### dim_region
+| Column | Type | Description |
+|---|---|---|
+| region_key | string | Surrogate key for a geopolitical/analysis region |
+| region_name | string | Name (e.g. Africa, Europe, Asia, Americas, Oceania) |
+| region_code | string | Short code (e.g. AF, EU, AS, AM, OC) |
+| description | string | Optional human-readable description |
+| source_population | string | Source of region mapping (metadata source)
+
 ---
 
 ## Fact Tables
@@ -151,6 +160,9 @@ flowchart TD
 | num_clinvar_evidence | int | Count of ClinVar records per variant |
 | avg_quality_score | double | Quality score for the variant |
 | processed_timestamp | timestamp | Gold processing event time |
+| region_key | string | FK to `dim_region` to indicate sample/analysis region |
+| region_name | string | Denormalized region name (for query convenience) |
+| sample_population | string | Population or cohort label mapped to region |
 
 ### gold_clinical_significance
 | Column | Type | Description |
@@ -162,6 +174,18 @@ flowchart TD
 | avg_quality_score | double | Average VCF quality for this group |
 | pathogenic_variant_ratio | double | Percent of variants labeled pathogenic |
 | rank_by_burden | int | Rank within clinical class |
+
+### gold_clinical_significance_by_region
+| Column | Type | Description |
+|---|---|---|
+| region_key | string | FK to `dim_region` |
+| region_name | string | Denormalized region name |
+| clinical_significance | string | ClinVar grouping |
+| total_variants | long | Number of variants with this label in region |
+| unique_genes | long | Distinct genes impacted in region |
+| avg_quality_score | double | Average VCF quality for region/class |
+| pathogenic_variant_ratio | double | Percent pathogenic in region |
+| rank_by_burden | int | Rank within region and clinical class |
 
 ### gold_gene_hotspots
 | Column | Type | Description |
@@ -175,6 +199,18 @@ flowchart TD
 | indel_count | long | Count of insertions/deletions |
 | avg_quality_score | double | Mean VCF quality score |
 | hotspot_rank | int | Dense rank by variant burden |
+
+### gold_gene_hotspots_by_region
+| Column | Type | Description |
+|---|---|---|
+| region_key | string | FK to `dim_region` |
+| region_name | string | Denormalized region name |
+| gene_key | string | FK to `dim_gene` |
+| gene_name | string | Gene symbol |
+| total_variants | long | Number of variants mapped to gene in region |
+| clinical_variants | long | Variants with clinical annotation in region |
+| avg_quality_score | double | Mean VCF quality for gene in region |
+| hotspot_rank | int | Dense rank by variant burden within region |
 
 ---
 
