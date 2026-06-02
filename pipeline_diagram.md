@@ -73,6 +73,11 @@ flowchart TD
     style GOLD_HOTSPOTS fill:#ffffff,stroke:#15803d
 ```
 
+## Pipeline Flow Summary
+- Bronze: ingest raw VCF, GTF, and ClinVar files into Bronze Delta tables with audit metadata.
+- Silver: parse and clean raw text into structured tables `silver_vcf_variants`, `silver_gene_annotations`, and `silver_clinical_variants`.
+- Gold: build dimensions, join them into `fact_variant_annotation`, and compute region-aware aggregated tables.
+
 ---
 
 ## Key Notes
