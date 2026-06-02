@@ -303,6 +303,19 @@ flowchart LR
   fact --> agg
 ```
 
+### Compact Pipeline Table
+
+| Source | Target | Relationship | Details |
+|---|---|---|---|
+| `VCF raw` | `silver_vcf_variants` | ingest | raw VCF data ingested into Bronze then parsed to Silver |
+| `GTF raw` | `silver_gene_annotations` | ingest | raw GTF data ingested into Bronze then parsed to Silver |
+| `ClinVar raw` | `silver_clinical_variants` | ingest | raw ClinVar data ingested into Bronze then parsed to Silver |
+| `silver_vcf_variants` | `silver_gene_annotations` | range join | join on `chrom = seqname AND pos BETWEEN start_pos AND end_pos` |
+| `silver_vcf_variants` | `silver_clinical_variants` | position join | join on `chrom = chromosome AND pos = start_pos` |
+| `silver_vcf_variants`, `silver_gene_annotations`, `silver_clinical_variants` | `Dimensions` | build | create `dim_variant`, `dim_gene`, `dim_clinvar_annotation`, and `dim_region` |
+| `Dimensions` | `fact_variant_annotation` | FK joins | join dim tables by surrogate keys into fact rows |
+| `fact_variant_annotation` | `Regional Aggregates` | aggregate | build regional summary tables `gold_clinical_significance_by_region`, `gold_gene_hotspots_by_region` |
+
 ---
 
 ## Schema ER Diagram (compact)
