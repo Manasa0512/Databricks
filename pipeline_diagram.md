@@ -267,43 +267,52 @@ LEFT JOIN dim_region dr ON f.region_key = dr.region_key
 
 ```mermaid
 %%{init: {"theme":"dark"}}%%
-flowchart LR
-  Bronze((Bronze)) -->|ingest| Silver((Silver))
-  Silver -->|transform & enrich| Gold((Gold))
-
-  subgraph BronzeSrc [Bronze sources]
+flowchart TD
+  subgraph Bronze[Bronze Layer]
     b_vcf[VCF raw]
     b_gtf[GTF raw]
     b_clin[ClinVar raw]
+    b_vcf -->|ingest| bronze_vcf[bronze_vcf_variants_raw]
+    b_gtf -->|ingest| bronze_gtf[bronze_gene_annotations_raw]
+    b_clin -->|ingest| bronze_clin[bronze_clinical_variants_raw]
   end
 
-  subgraph SilverOps [Silver tables]
-    s_vcf[silver_vcf_variants]
-    s_gtf[silver_gene_annotations]
-    s_clin[silver_clinical_variants]
+  subgraph Silver[Silver Layer]
+    silver_vcf[silver_vcf_variants]
+    silver_gtf[silver_gene_annotations]
+    silver_clin[silver_clinical_variants]
   end
 
-  subgraph GoldOps [Gold tables]
-    dim[Dimensions]
-    fact[fact_variant_annotation]
-    agg[Regional Aggregates]
+  subgraph Gold[Gold Layer]
+    dim_variant[dim_variant]
+    dim_gene[dim_gene]
+    dim_clinvar[dim_clinvar_annotation]
+    dim_region[dim_region]
+    fact_variant[fact_variant_annotation]
+    gold_clinical[gold_clinical_significance_by_region]
+    gold_hotspots[gold_gene_hotspots_by_region]
   end
 
-  b_vcf --> s_vcf
-  b_gtf --> s_gtf
-  b_clin --> s_clin
+  bronze_vcf -->|parse| silver_vcf
+  bronze_gtf -->|parse| silver_gtf
+  bronze_clin -->|parse| silver_clin
 
-  s_vcf -->|range join| s_gtf
-  s_vcf -->|position join| s_clin
+  silver_vcf -->|range join: chrom = seqname AND pos BETWEEN start_pos AND end_pos| silver_gtf
+  silver_vcf -->|position join: chrom = chromosome AND pos = start_pos| silver_clin
 
-  s_vcf --> dim
-  s_gtf --> dim
-  s_clin --> dim
-  dim -->|FK joins| fact
-  fact --> agg
+  silver_vcf -->|build| dim_variant
+  silver_gtf -->|build| dim_gene
+  silver_clin -->|build| dim_clinvar
+  silver_clin -->|map region| dim_region
+
+  dim_variant -->|FK join| fact_variant
+  dim_gene -->|FK join| fact_variant
+  dim_clinvar -->|FK join| fact_variant
+  dim_region -->|FK join| fact_variant
+
+  fact_variant -->|aggregate| gold_clinical
+  fact_variant -->|aggregate| gold_hotspots
 ```
-
-First I want this diagram to be visible in dark mode. Second, the key, typecast, and column name are shown in separate columns in table format. Third, the joins are specified explicitly in the Joins section.
 
 ---
 
